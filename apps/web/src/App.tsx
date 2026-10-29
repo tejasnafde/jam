@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { useAuth } from "@/features/auth/authContext";
 import { Booth } from "@/features/booth/Booth";
 import { UserAvatar } from "@/features/auth/UserAvatar";
+import { useGrants } from "@/features/connect/useGrants";
 import { useTokens } from "@/features/connect/useTokens";
 import { useSamples } from "@/features/library/useSamples";
 import { EditorPane } from "@/features/editor/EditorPane";
@@ -23,6 +24,7 @@ export function App({ panelOverride }: { panelOverride?: PanelOverride }) {
   const auth = useAuth();
   const plan = usePlan(auth.api);
   const tokens = useTokens(auth.api);
+  const grants = useGrants(auth.api);
   const library = useSamples(auth.api);
   // New stems and prepared samples show up when a prep job ends.
   const { refresh } = library;
@@ -39,11 +41,13 @@ export function App({ panelOverride }: { panelOverride?: PanelOverride }) {
     plan,
     tokens: tokens.tokens,
     freshToken: tokens.fresh,
+    grants: grants.grants,
     origin: window.location.origin,
     onSignIn: () => void auth.signIn(),
     onSignOut: () => void auth.signOut(),
     onCreateToken: (label) => void tokens.create(label),
     onRevokeToken: (id) => void tokens.revoke(id),
+    onRevokeGrant: (id) => void grants.revoke(id),
     samples: library.samples,
     uploadingSample: library.uploading,
     onUploadSample: (file) => void library.upload(file),

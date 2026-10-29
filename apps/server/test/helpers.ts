@@ -1,6 +1,6 @@
 import request from "supertest";
 import { expect } from "vitest";
-import { createApp } from "../src/app.js";
+import { createApp, type AppDeps } from "../src/app.js";
 import { SoundIndex } from "../src/sounds/soundIndex.js";
 import { MemoryBlobs } from "../src/store/blobs.js";
 import type { PrepRun } from "../src/prep/runner.js";
@@ -27,7 +27,13 @@ export const fakeFetcher = async (url: string) => {
   return fakeMaps[key];
 };
 
-export function setup() {
+/** A clock the test moves by hand. */
+export function testClock(start = Date.parse("2026-10-30T12:00:00Z")) {
+  let t = start;
+  return { now: () => t, advance: (ms: number) => (t += ms) };
+}
+
+export function setup(overrides: Partial<Pick<AppDeps, "oauth" | "fetchDocument" | "staticDir">> = {}) {
   const store = new MemoryStore();
   const samples = new MemorySampleStore();
   const blobs = new MemoryBlobs();
@@ -39,6 +45,7 @@ export function setup() {
     if (runner.fail) throw new Error("Cloud Run said no");
     runs.push(r);
   };
+  const clock = testClock();
   const app = createApp({
     store,
     samples,
@@ -46,8 +53,11 @@ export function setup() {
     sounds: new SoundIndex(fakeFetcher),
     verifyIdToken,
     prep: { store: prep, run },
+    fetchDocument: overrides.fetchDocument,
+    staticDir: overrides.staticDir,
+    oauth: { rateLimits: false, now: clock.now, ...overrides.oauth },
   });
-  return { store, samples, blobs, prep, runs, runner, app, ...clients(app) };
+  return { store, samples, blobs, prep, runs, runner, app, clock, ...clients(app) };
 }
 
 const ACCEPT = "application/json, text/event-stream";

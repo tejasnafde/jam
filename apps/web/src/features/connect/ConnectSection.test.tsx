@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { claudeCommand } from "./claudeCommand";
@@ -9,8 +9,10 @@ const base = {
   origin: "https://jam.tn07.dev",
   tokens: [],
   fresh: null,
+  grants: [],
   onCreate: () => {},
   onRevoke: () => {},
+  onRevokeGrant: () => {},
 };
 
 describe("ConnectSection", () => {
@@ -18,6 +20,24 @@ describe("ConnectSection", () => {
     render(<ConnectSection {...base} signedIn={false} />);
     expect(screen.getByText(/Sign in to create a key/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Create key" })).not.toBeInTheDocument();
+  });
+
+  it("shows the connector URL with a copy button, signed in or not", () => {
+    render(<ConnectSection {...base} signedIn={false} />);
+    expect(screen.getByText("https://jam.tn07.dev/mcp")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy connector URL" })).toBeInTheDocument();
+    expect(screen.getByText(/Add custom connector/)).toBeInTheDocument();
+    expect(screen.getByText(/Developer mode/)).toBeInTheDocument();
+  });
+
+  it("lists connected apps and revokes one", async () => {
+    const onRevokeGrant = vi.fn();
+    const grants = [{ id: "g1", clientName: "ChatGPT", createdAt: "", lastUsedAt: null }];
+    render(<ConnectSection {...base} signedIn grants={grants} onRevokeGrant={onRevokeGrant} />);
+    const list = screen.getByRole("list", { name: "Connected apps" });
+    expect(list).toHaveTextContent("ChatGPT");
+    await userEvent.click(within(list).getByRole("button", { name: "Revoke" }));
+    expect(onRevokeGrant).toHaveBeenCalledWith("g1");
   });
 
   it("creates a key with the typed name", async () => {

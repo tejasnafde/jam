@@ -46,6 +46,7 @@ const app = createApp({
     }),
   },
   staticDir,
+  oauth: { publicUrl: config.PUBLIC_URL, edgeSecret: config.JAM_EDGE_SECRET ?? null },
   log,
 });
 
