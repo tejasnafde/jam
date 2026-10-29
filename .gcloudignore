@@ -1,0 +1,3 @@
+# Cloud Build uploads the source; keep it to what the Dockerfile needs.
+#!include:.dockerignore
+.gitignore

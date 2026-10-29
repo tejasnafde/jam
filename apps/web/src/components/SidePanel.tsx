@@ -1,0 +1,69 @@
+import type { SessionPlan, TokenInfo } from "@jam/shared";
+import { useState } from "react";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { AccountSection } from "@/features/auth/AccountSection";
+import type { Profile } from "@/features/auth/authContext";
+import { ConnectSection } from "@/features/connect/ConnectSection";
+import { PlanSection } from "@/features/plan/PlanSection";
+import { PanelCard } from "./PanelCard";
+
+export interface SidePanelProps {
+  profile: Profile | null;
+  plan: SessionPlan | null;
+  tokens: TokenInfo[];
+  freshToken: string | null;
+  origin: string;
+  onSignIn: () => void;
+  onSignOut: () => void;
+  onCreateToken: (label: string) => void;
+  onRevokeToken: (id: string) => void;
+}
+
+export function SidePanel(props: SidePanelProps) {
+  const { profile, plan, tokens, freshToken } = props;
+  // "Connect" is collapsed once a key exists and opens to show a new one. A manual
+  // toggle holds until the next new key.
+  const [manual, setManual] = useState<{ forToken: string | null; open: boolean } | null>(null);
+  const autoOpen = !profile || tokens.length === 0 || !!freshToken;
+  const connectOpen = manual && manual.forToken === freshToken ? manual.open : autoOpen;
+  const setConnectOpen = (open: boolean) => setManual({ forToken: freshToken, open });
+
+  return (
+    <aside className="h-full min-h-0 border-border bg-background md:border-l" aria-label="Side panel">
+      <ScrollArea className="h-full">
+        <div className="flex min-h-full flex-col gap-4 p-3 md:p-4">
+          <PanelCard title="Today we paint" coach>
+            <PlanSection plan={plan} signedIn={!!profile} />
+          </PanelCard>
+          <PanelCard title="Connect an assistant" coach open={connectOpen} onOpenChange={setConnectOpen}>
+            <ConnectSection
+              signedIn={!!profile}
+              origin={props.origin}
+              tokens={tokens}
+              fresh={freshToken}
+              onCreate={props.onCreateToken}
+              onRevoke={props.onRevokeToken}
+            />
+          </PanelCard>
+          <PanelCard title="Account">
+            <AccountSection profile={profile} onSignIn={props.onSignIn} onSignOut={props.onSignOut} />
+          </PanelCard>
+          <footer className="mt-auto flex justify-center gap-2 py-2 text-xs text-muted-foreground">
+            <a
+              className="hover:text-foreground"
+              href="https://github.com/tejasnafde/jam"
+              target="_blank"
+              rel="noopener"
+            >
+              Source (AGPL-3.0)
+            </a>
+            <span aria-hidden="true">&middot;</span>
+            <a className="hover:text-foreground" href="https://strudel.cc" target="_blank" rel="noopener">
+              Made with Strudel
+            </a>
+          </footer>
+        </div>
+      </ScrollArea>
+    </aside>
+  );
+}

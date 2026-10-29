@@ -1,0 +1,42 @@
+{
+  "name": "jam",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Strudel live-coding page plus a read-only MCP server for an AI music coach",
+  "license": "AGPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tejasnafde/jam"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @jam/web",
+    "dev:server": "npm run dev -w @jam/server",
+    "build": "npm run build -w @jam/shared && npm run build -w @jam/server && npm run build -w @jam/web",
+    "start": "npm run start -w @jam/server",
+    "typecheck": "tsc -b packages/shared apps/server && tsc -p apps/server/tsconfig.test.json && npm run typecheck -w @jam/web",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run --maxWorkers=2"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.6.6",
+    "eslint": "^10.13.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.7",
+    "globals": "^17.13.0",
+    "prettier": "^3.9.10",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.72.1",
+    "vitest": "^5.0.5"
+  }
+}

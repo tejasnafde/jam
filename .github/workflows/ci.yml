@@ -1,0 +1,82 @@
+name: CI and deploy
+
+# Every push and pull request runs the checks. A push to main that passes them
+# deploys to Cloud Run. There is no other deploy path.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  PROJECT: teejayproject
+  REGION: asia-south1
+  SERVICE: jam
+  RUNTIME_SA: jam-run@teejayproject.iam.gserviceaccount.com
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  deploy:
+    needs: check
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # Workload Identity Federation
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/974343814740/locations/global/workloadIdentityPools/github-actions/providers/github
+          service_account: 974343814740-compute@developer.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy
+        run: |
+          # --project is explicit: gcloud otherwise infers it from the
+          # credential's email domain and tries a project named "developer".
+          gcloud run deploy "$SERVICE" \
+            --source . \
+            --project="$PROJECT" \
+            --region="$REGION" \
+            --service-account="$RUNTIME_SA" \
+            --allow-unauthenticated \
+            --labels=app=jam \
+            --memory=512Mi --cpu=1 --min-instances=0 --max-instances=4 \
+            --set-env-vars="GOOGLE_CLOUD_PROJECT=${PROJECT},FIRESTORE_DATABASE=jam-db" \
+            --quiet
+
+      - name: Verify it serves
+        run: |
+          for url in "https://jam-974343814740.${REGION}.run.app/healthz" "https://jam.tn07.dev/healthz"; do
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" -m 60 "$url")
+            echo "$url -> HTTP ${CODE}"
+            [ "$CODE" = "200" ] || exit 1
+          done
+          # MCP must refuse a request with no token.
+          CODE=$(curl -s -o /dev/null -w "%{http_code}" -m 30 -X POST https://jam.tn07.dev/mcp -H 'Content-Type: application/json' -d '{}')
+          echo "unauthenticated /mcp -> HTTP ${CODE}"
+          [ "$CODE" = "401" ]
