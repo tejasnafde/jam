@@ -1,49 +1,56 @@
 import { ChevronDown } from "lucide-react";
 import type { ReactNode } from "react";
-import { Card, CardContent } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 
 interface Props {
   title: string;
+  /** A coach section: the heading carries the water accent. */
   coach?: boolean;
+  /** A short fact beside the heading: "Stage 2 of 5", "3 samples". */
+  meta?: ReactNode;
   children: ReactNode;
-  /** When set, the card can collapse. */
+  /** When set, the section can collapse. */
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }
 
-function Heading({ title, coach }: { title: string; coach?: boolean }) {
+function Heading({ title, coach, meta }: Pick<Props, "title" | "coach" | "meta">) {
   return (
-    <h2 className="flex items-center gap-2 text-[13px] font-medium tracking-[0.06em] text-muted-foreground uppercase">
-      {coach && <span className="size-2 rounded-full bg-water" aria-hidden="true" />}
-      {title}
-    </h2>
+    <span className="flex min-w-0 flex-1 items-baseline justify-between gap-3">
+      <h2 className={cn("truncate text-[15px] leading-tight font-semibold tracking-tight", coach && "text-water")}>
+        {title}
+      </h2>
+      {meta && <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{meta}</span>}
+    </span>
   );
 }
 
-export function PanelCard({ title, coach, children, open, onOpenChange }: Props) {
+/**
+ * One section of the side panel. No box: a heading with room around it, and the
+ * content below. Sections are separated by a hairline in the panel.
+ */
+export function PanelCard({ title, coach, meta, children, open, onOpenChange }: Props) {
   if (open === undefined) {
     return (
-      <Card className="gap-0 py-4">
-        <CardContent className="flex flex-col gap-3 px-4">
-          <Heading title={title} coach={coach} />
-          {children}
-        </CardContent>
-      </Card>
+      <section className="flex flex-col gap-3.5 py-5 first:pt-1" aria-label={title}>
+        <Heading title={title} coach={coach} meta={meta} />
+        {children}
+      </section>
     );
   }
   return (
-    <Card className="gap-0 py-4">
+    <section className="py-5" aria-label={title}>
       <Collapsible open={open} onOpenChange={onOpenChange}>
-        <CardContent className="px-4">
-          <CollapsibleTrigger className="flex w-full items-center justify-between rounded-md text-left">
-            <Heading title={title} coach={coach} />
-            <ChevronDown className={cn("size-4 text-muted-foreground transition-transform", open && "rotate-180")} />
-          </CollapsibleTrigger>
-          <CollapsibleContent className="pt-3">{children}</CollapsibleContent>
-        </CardContent>
+        <CollapsibleTrigger className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-3 rounded-md px-2 py-1 text-left outline-none hover:bg-secondary/60 focus-visible:ring-3 focus-visible:ring-ring/50">
+          <Heading title={title} coach={coach} meta={meta} />
+          <ChevronDown
+            className={cn("size-4 flex-none text-muted-foreground transition-transform", open && "rotate-180")}
+            aria-hidden="true"
+          />
+        </CollapsibleTrigger>
+        <CollapsibleContent className="pt-3.5">{children}</CollapsibleContent>
       </Collapsible>
-    </Card>
+    </section>
   );
 }

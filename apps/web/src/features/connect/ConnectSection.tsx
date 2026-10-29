@@ -20,39 +20,44 @@ interface Props {
 const INTRO = "Your coach reads your code, history and sound. It can write the session plan, never your music.";
 
 function Subheading({ children }: { children: ReactNode }) {
-  return <h3 className="text-sm font-medium">{children}</h3>;
+  return <h3 className="text-sm font-semibold">{children}</h3>;
 }
 
 function RevokeRow({ title, detail, onRevoke }: { title: string; detail: string; onRevoke: () => void }) {
   return (
-    <li className="flex items-center justify-between gap-2 rounded-lg bg-background py-2 pr-2 pl-3">
+    <li className="flex items-center justify-between gap-2 border-b border-hairline py-2 last:border-0">
       <div className="min-w-0">
         <p className="truncate text-sm">{title}</p>
         <p className="text-xs text-muted-foreground">{detail}</p>
       </div>
-      <Button variant="outline" size="sm" onClick={onRevoke}>
+      <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-destructive" onClick={onRevoke}>
         Revoke
       </Button>
     </li>
   );
 }
 
+function Step({ app, children }: { app: string; children: ReactNode }) {
+  return (
+    <li className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-2 text-xs leading-relaxed text-muted-foreground">
+      <span className="font-medium text-foreground">{app}</span>
+      <span>{children}</span>
+    </li>
+  );
+}
+
 function ConnectorSteps({ origin }: { origin: string }) {
   return (
-    <div className="flex flex-col gap-2">
-      <p className="text-xs text-muted-foreground">Add jam as a custom connector with this URL:</p>
+    <div className="flex flex-col gap-2.5">
       <CopyField value={mcpUrl(origin)} label="connector URL" />
-      <ul className="flex flex-col gap-1.5 text-xs text-muted-foreground">
-        <li>
-          <span className="text-foreground">claude.ai:</span> Settings, then Connectors, then Add custom connector.
-          Paste the URL and select Connect.
-        </li>
-        <li>
-          <span className="text-foreground">ChatGPT:</span> Settings, then Apps and Connectors, then Advanced settings.
-          Turn on Developer mode. Then select Create, paste the URL and choose OAuth.
-        </li>
+      <ul className="flex flex-col gap-1.5">
+        <Step app="claude.ai">Settings, Connectors, Add custom connector. Paste the URL and select Connect.</Step>
+        <Step app="ChatGPT">
+          Settings, Apps and Connectors, Advanced settings, turn on Developer mode. Then Create, paste the URL and
+          choose OAuth.
+        </Step>
       </ul>
-      <p className="text-xs text-muted-foreground">A jam page opens. Sign in there and select Allow.</p>
+      <p className="text-xs leading-relaxed text-muted-foreground">A jam page opens. Sign in there and select Allow.</p>
     </div>
   );
 }
@@ -67,14 +72,14 @@ export function ConnectSection({ signedIn, origin, tokens, fresh, grants, onCrea
   };
 
   return (
-    <div className="flex flex-col gap-4">
-      <p className="text-sm text-muted-foreground">{INTRO}</p>
+    <div className="flex flex-col gap-5">
+      <p className="text-sm leading-relaxed text-muted-foreground">{INTRO}</p>
 
-      <section className="flex flex-col gap-2" aria-label="claude.ai or ChatGPT">
+      <section className="flex flex-col gap-2.5" aria-label="claude.ai or ChatGPT">
         <Subheading>claude.ai or ChatGPT</Subheading>
         <ConnectorSteps origin={origin} />
         {signedIn && grants.length > 0 && (
-          <ul className="flex flex-col gap-2 pt-1" aria-label="Connected apps">
+          <ul className="flex flex-col" aria-label="Connected apps">
             {grants.map((g) => (
               <RevokeRow
                 key={g.id}
@@ -87,23 +92,23 @@ export function ConnectSection({ signedIn, origin, tokens, fresh, grants, onCrea
         )}
       </section>
 
-      <section className="flex flex-col gap-3" aria-label="Claude Code">
+      <section className="flex flex-col gap-2.5" aria-label="Claude Code">
         <Subheading>Claude Code, with a personal key</Subheading>
         {!signedIn ? (
-          <p className="text-sm text-muted-foreground">Sign in to create a key for your assistant.</p>
+          <p className="text-sm leading-relaxed text-muted-foreground">Sign in to create a key for your assistant.</p>
         ) : (
           <>
             {fresh && (
-              <div className="flex flex-col gap-2 rounded-lg border border-water/35 bg-background p-3">
-                <p className="text-xs text-muted-foreground">Copy this key now. It is shown once.</p>
+              <div className="flex flex-col gap-2 border-l-2 border-water pl-3">
+                <p className="text-xs font-medium text-water">Copy this key now. It is shown once.</p>
                 <CopyField value={fresh} label="key" />
-                <p className="pt-1 text-xs text-muted-foreground">Claude Code:</p>
+                <p className="pt-1 text-xs text-muted-foreground">Or add it to Claude Code in one line:</p>
                 <CopyField value={claudeCommand(origin, fresh)} label="command" />
               </div>
             )}
 
             {tokens.length > 0 && (
-              <ul className="flex flex-col gap-2" aria-label="Your keys">
+              <ul className="flex flex-col" aria-label="Your keys">
                 {tokens.map((t) => (
                   <RevokeRow
                     key={t.id}
@@ -120,7 +125,7 @@ export function ConnectSection({ signedIn, origin, tokens, fresh, grants, onCrea
                 value={label}
                 onChange={(e) => setLabel(e.target.value)}
                 maxLength={60}
-                placeholder="Name, e.g. Claude Code"
+                placeholder="Name this key"
                 aria-label="Key name"
                 className="h-9"
               />

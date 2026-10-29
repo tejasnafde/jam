@@ -36,7 +36,7 @@ function Elapsed({ since }: { since: number }) {
   }, []);
   const s = Math.max(0, Math.floor((now - since) / 1000));
   return (
-    <span className="font-mono text-sm tabular-nums text-oil">{`${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`}</span>
+    <span className="font-mono text-base font-medium tabular-nums text-oil">{`${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`}</span>
   );
 }
 
@@ -173,23 +173,29 @@ export function Booth({ getCps, library }: { getCps: () => number | null; librar
           <span className="max-sm:hidden">Booth</span>
         </Button>
       </SheetTrigger>
-      <SheetContent className="gap-0 overflow-y-auto data-[side=right]:w-full data-[side=right]:sm:max-w-md">
-        <SheetHeader className="border-b border-border">
-          <SheetTitle>Vocal booth</SheetTitle>
-          <SheetDescription>Record a take, shape it, and save it as a sample for Strudel.</SheetDescription>
-        </SheetHeader>
-
-        <div className="space-y-5 p-4">
-          <p className="flex items-start gap-2 rounded-lg border border-water/30 bg-water/5 p-3 text-sm">
-            <Headphones className="mt-0.5 size-4 flex-none text-water" />
+      <SheetContent className="gap-0 overflow-y-auto bg-background data-[side=right]:w-full data-[side=right]:sm:max-w-md">
+        <SheetHeader className="gap-1 px-5 pt-5 pb-0">
+          <SheetTitle className="text-xl font-semibold tracking-tight">Vocal booth</SheetTitle>
+          <SheetDescription className="leading-relaxed">
+            Record a take, shape it, and save it as a sample for Strudel.
+          </SheetDescription>
+          <p className="mt-2 flex items-start gap-2 text-xs leading-relaxed text-muted-foreground">
+            <Headphones className="mt-0.5 size-3.5 flex-none text-water" aria-hidden="true" />
             <span>Wear headphones. Speakers leak into the mic, and the count-in clicks get on the take.</span>
           </p>
+        </SheetHeader>
 
+        <div className="space-y-6 p-5">
           <section className="space-y-3">
             <Scope analyser={recording || !take ? mic.analyser : null} take={take?.data ?? null} hot={recording} />
             {mic.phase === "off" || mic.phase === "asking" || mic.phase === "denied" ? (
               <div className="space-y-2">
-                <Button onClick={() => void mic.enable()} disabled={mic.phase === "asking"} className="w-full">
+                <Button
+                  onClick={() => void mic.enable()}
+                  disabled={mic.phase === "asking"}
+                  size="lg"
+                  className="w-full rounded-full font-bold"
+                >
                   {mic.phase === "asking" ? <Loader2 className="animate-spin" /> : <Mic />}
                   {mic.phase === "asking" ? "Waiting for permission" : "Allow microphone"}
                 </Button>
@@ -204,7 +210,8 @@ export function Booth({ getCps, library }: { getCps: () => number | null; librar
                 <Button
                   onClick={() => (recording ? mic.stop() : mic.record(COUNT_INS[countIn], bpm))}
                   variant={recording ? "default" : "outline"}
-                  className="min-w-28"
+                  size="lg"
+                  className={cn("min-w-28 rounded-full font-bold", recording && "jam-breathe")}
                   aria-label={recording ? "Stop recording" : "Record"}
                 >
                   {recording ? <Square className="fill-current" /> : <span className="size-3 rounded-full bg-oil" />}
@@ -228,7 +235,7 @@ export function Booth({ getCps, library }: { getCps: () => number | null; librar
                 </div>
               </div>
             )}
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
               <Label htmlFor="booth-bpm" className="text-xs text-muted-foreground">
                 Tempo
               </Label>
@@ -246,17 +253,27 @@ export function Booth({ getCps, library }: { getCps: () => number | null; librar
                 className="h-7 w-20 font-mono"
                 disabled={recording}
               />
-              <span>bpm{bpmFromStrudel ? ", from Strudel" : ""}. Count-in and delay follow it.</span>
+              <span>bpm{bpmFromStrudel ? ", from Strudel" : ""}</span>
+              <span className="basis-full">The count-in and the delay follow it.</span>
             </div>
           </section>
 
           {take && !recording && (
             <>
               <section className="space-y-3">
-                <h3 className="text-sm font-medium">Effects</h3>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex items-baseline justify-between gap-3">
+                  <h3 className="text-[15px] font-semibold tracking-tight">Effects</h3>
+                  <span className="text-xs text-muted-foreground">Presets</span>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
                   {PRESETS.map((p) => (
-                    <Button key={p} variant="outline" size="sm" onClick={() => setFx(preset(p, fx))}>
+                    <Button
+                      key={p}
+                      variant="outline"
+                      size="sm"
+                      className="rounded-full"
+                      onClick={() => setFx(preset(p, fx))}
+                    >
                       {p}
                     </Button>
                   ))}
@@ -264,7 +281,7 @@ export function Booth({ getCps, library }: { getCps: () => number | null; librar
                 <EffectsPanel fx={fx} onChange={setFx} />
               </section>
 
-              <section className="sticky bottom-0 -mx-4 space-y-3 border-t border-border bg-background p-4">
+              <section className="sticky bottom-0 -mx-5 space-y-3 border-t border-hairline bg-background p-5">
                 <div className="flex items-center gap-2">
                   <Button variant="outline" onClick={() => void togglePreview()} disabled={busy !== null}>
                     {busy === "render" ? <Loader2 className="animate-spin" /> : playing ? <Square /> : <Play />}

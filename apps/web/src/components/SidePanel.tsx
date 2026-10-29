@@ -28,6 +28,8 @@ export interface SidePanelProps {
   prep?: PrepHandle;
 }
 
+const count = (n: number, one: string, many: string) => (n === 1 ? `1 ${one}` : `${n} ${many}`);
+
 export function SidePanel(props: SidePanelProps) {
   const { profile, plan, tokens, freshToken, grants } = props;
   // "Connect" is collapsed once a key or a connected app exists, and opens to show a
@@ -37,14 +39,21 @@ export function SidePanel(props: SidePanelProps) {
   const connectOpen = manual && manual.forToken === freshToken ? manual.open : autoOpen;
   const setConnectOpen = (open: boolean) => setManual({ forToken: freshToken, open });
 
+  const connected = tokens.length + grants.length;
+  const planMeta = plan
+    ? plan.currentStage >= plan.stages.length
+      ? "Finished"
+      : `Stage ${plan.currentStage + 1} of ${plan.stages.length}`
+    : undefined;
+
   return (
-    <aside className="h-full min-h-0 border-border bg-background md:border-l" aria-label="Side panel">
+    <aside className="h-full min-h-0 border-hairline bg-background md:border-l" aria-label="Side panel">
       <ScrollArea className="h-full">
-        <div className="flex min-h-full flex-col gap-4 p-3 md:p-4">
-          <PanelCard title="Today we paint" coach>
+        <div className="flex min-h-full flex-col divide-y divide-hairline px-4 pt-4 md:px-5">
+          <PanelCard title="Today we paint" coach meta={planMeta}>
             <PlanSection plan={plan} signedIn={!!profile} />
           </PanelCard>
-          <PanelCard title="Library">
+          <PanelCard title="Library" meta={profile ? count(props.samples.length, "sample", "samples") : undefined}>
             <LibrarySection
               signedIn={!!profile}
               samples={props.samples}
@@ -54,7 +63,13 @@ export function SidePanel(props: SidePanelProps) {
               prep={props.prep}
             />
           </PanelCard>
-          <PanelCard title="Connect an assistant" coach open={connectOpen} onOpenChange={setConnectOpen}>
+          <PanelCard
+            title="Connect an assistant"
+            coach
+            meta={profile && connected > 0 ? count(connected, "connected", "connected") : undefined}
+            open={connectOpen}
+            onOpenChange={setConnectOpen}
+          >
             <ConnectSection
               signedIn={!!profile}
               origin={props.origin}
@@ -69,17 +84,21 @@ export function SidePanel(props: SidePanelProps) {
           <PanelCard title="Account">
             <AccountSection profile={profile} onSignIn={props.onSignIn} onSignOut={props.onSignOut} />
           </PanelCard>
-          <footer className="mt-auto flex justify-center gap-2 py-2 text-xs text-muted-foreground">
+          <footer className="mt-auto flex gap-3 py-4 text-xs text-muted-foreground">
             <a
-              className="hover:text-foreground"
+              className="rounded-sm outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
               href="https://github.com/tejasnafde/jam"
               target="_blank"
               rel="noopener"
             >
-              Source (AGPL-3.0)
+              Source, AGPL-3.0
             </a>
-            <span aria-hidden="true">&middot;</span>
-            <a className="hover:text-foreground" href="https://strudel.cc" target="_blank" rel="noopener">
+            <a
+              className="rounded-sm outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+              href="https://strudel.cc"
+              target="_blank"
+              rel="noopener"
+            >
               Made with Strudel
             </a>
           </footer>

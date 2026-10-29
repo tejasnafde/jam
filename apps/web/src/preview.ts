@@ -2,6 +2,20 @@
 import type { SampleWithUrl } from "@jam/shared";
 import type { PanelOverride } from "./App";
 
+/** ?preview=empty: signed in, nothing made yet. ?preview (or ?preview=active): a session in progress. */
+export function previewPanel(state: string | null): PanelOverride {
+  if (state !== "empty") return PREVIEW_PANEL;
+  return {
+    ...PREVIEW_PANEL,
+    plan: null,
+    tokens: [],
+    grants: [],
+    freshToken: null,
+    samples: [],
+    prep: { jobs: {}, start: async () => {} },
+  };
+}
+
 export const PREVIEW_PANEL: PanelOverride = {
   profile: { name: "Tejas", email: "tejas@example.com", photoUrl: null },
   plan: {
