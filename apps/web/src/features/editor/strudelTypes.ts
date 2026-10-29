@@ -14,6 +14,7 @@ export interface StrudelMirror {
   stop(): Promise<void>;
   setCode(code: string): void;
   changeSetting(key: string, value: unknown): void;
+  repl?: { scheduler?: { cps?: number } };
 }
 
 export interface StrudelEditorElement extends HTMLElement {
