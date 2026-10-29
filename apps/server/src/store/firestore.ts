@@ -4,12 +4,44 @@
 //   users/{uid}/audio/{id}      AudioSnapshot
 //   users/{uid}/plans/{id}      SessionPlan (newest is current)
 //   tokens/{sha256(token)}      TokenRecord
+//   oauthClients/{sha256(id)}   OAuthClientRecord (the client id can be a URL, which is not a valid doc id)
+//   oauthRequests/{id}          AuthRequestRecord, deleted when the user decides
+//   oauthCodes/{sha256(code)}   AuthCodeRecord
+//   oauthGrants/{id}            GrantRecord
+//   oauthTokens/{sha256(token)} OAuthTokenRecord
+// Requests, codes and OAuth tokens carry `expireAt` (a Timestamp) for a Firestore TTL policy.
+// A registered client carries it too, until a grant claims it (24 h after registration).
+// Every query is a single-field equality, so no composite index is needed.
 
 import type { AudioSnapshot, CodeVersion, PlanInput, SessionPlan } from "@jam/shared";
-import type { DocumentSnapshot, Firestore } from "firebase-admin/firestore";
-import type { NewAudioSnapshot, PlanPatch, Store, TokenRecord } from "./types.js";
+import { FieldValue, type DocumentSnapshot, type Firestore } from "firebase-admin/firestore";
+import { createHash } from "node:crypto";
+import type {
+  AuthCodeRecord,
+  AuthRequestRecord,
+  GrantRecord,
+  NewAudioSnapshot,
+  OAuthClientRecord,
+  OAuthTokenRecord,
+  PlanPatch,
+  Store,
+  TokenRecord,
+} from "./types.js";
+import { UNCLAIMED_CLIENT_TTL_MS } from "./types.js";
 
 const now = () => new Date().toISOString();
+const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
+
+/** How long a rotated refresh token is kept to detect a replay. */
+const ROTATED_KEEP_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** Reads a record that was written with an extra `expireAt` field, without that field. */
+function record<T>(doc: DocumentSnapshot): T | null {
+  if (!doc.exists) return null;
+  const data = { ...doc.data() };
+  delete data.expireAt;
+  return data as T;
+}
 
 function withId<T>(doc: DocumentSnapshot): T {
   return { id: doc.id, ...doc.data() } as T;
@@ -113,5 +145,126 @@ export class FirestoreStore implements Store {
     if (!doc.exists || doc.get("uid") !== uid) return false;
     await ref.delete();
     return true;
+  }
+
+  private oauth(name: "oauthClients" | "oauthRequests" | "oauthCodes" | "oauthGrants" | "oauthTokens") {
+    return this.db.collection(name);
+  }
+
+  async saveOAuthClient(client: OAuthClientRecord) {
+    const expireAt = new Date(client.clientIdIssuedAt * 1000 + UNCLAIMED_CLIENT_TTL_MS);
+    await this.oauth("oauthClients")
+      .doc(sha256(client.clientId))
+      .set({ ...client, expireAt });
+  }
+
+  async getOAuthClient(clientId: string) {
+    return record<OAuthClientRecord>(await this.oauth("oauthClients").doc(sha256(clientId)).get());
+  }
+
+  async saveAuthRequest(request: AuthRequestRecord) {
+    await this.oauth("oauthRequests")
+      .doc(request.id)
+      .create({ ...request, expireAt: new Date(request.expiresAt) });
+  }
+
+  async getAuthRequest(id: string) {
+    return record<AuthRequestRecord>(await this.oauth("oauthRequests").doc(id).get());
+  }
+
+  async takeAuthRequest(id: string) {
+    const ref = this.oauth("oauthRequests").doc(id);
+    return this.db.runTransaction(async (tx) => {
+      const found = record<AuthRequestRecord>(await tx.get(ref));
+      if (found) tx.delete(ref);
+      return found;
+    });
+  }
+
+  async saveAuthCode(code: AuthCodeRecord) {
+    await this.oauth("oauthCodes")
+      .doc(code.hash)
+      .create({ ...code, expireAt: new Date(code.expiresAt) });
+  }
+
+  async getAuthCode(hash: string) {
+    return record<AuthCodeRecord>(await this.oauth("oauthCodes").doc(hash).get());
+  }
+
+  async redeemAuthCode(hash: string, at: number, grantFor: (code: AuthCodeRecord) => GrantRecord | null) {
+    const ref = this.oauth("oauthCodes").doc(hash);
+    return this.db.runTransaction(async (tx) => {
+      const found = record<AuthCodeRecord>(await tx.get(ref));
+      if (!found || found.usedAt !== null) return found;
+      const grant = grantFor(found);
+      // Every read comes before the first write in a Firestore transaction.
+      const clientRef = this.oauth("oauthClients").doc(sha256(found.clientId));
+      const client = grant ? await tx.get(clientRef) : null;
+      tx.update(ref, { usedAt: at });
+      if (grant) {
+        tx.set(this.oauth("oauthGrants").doc(grant.id), grant);
+        if (client?.exists) tx.update(clientRef, { expireAt: FieldValue.delete() });
+      }
+      return found;
+    });
+  }
+
+  async saveGrant(grant: GrantRecord) {
+    await this.oauth("oauthGrants").doc(grant.id).set(grant);
+  }
+
+  async getGrant(id: string) {
+    return record<GrantRecord>(await this.oauth("oauthGrants").doc(id).get());
+  }
+
+  async listGrants(uid: string) {
+    const snap = await this.oauth("oauthGrants").where("uid", "==", uid).get();
+    return snap.docs
+      .map((d) => record<GrantRecord>(d))
+      .filter((g): g is GrantRecord => g !== null)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  async touchGrant(id: string) {
+    await this.oauth("oauthGrants").doc(id).update({ lastUsedAt: now() });
+  }
+
+  async deleteGrant(id: string) {
+    // The grant goes first: a token whose grant is gone no longer refreshes.
+    await this.oauth("oauthGrants").doc(id).delete();
+    const tokens = this.oauth("oauthTokens").where("grantId", "==", id).limit(400);
+    for (;;) {
+      const snap = await tokens.get();
+      if (snap.empty) return;
+      const batch = this.db.batch();
+      for (const doc of snap.docs) batch.delete(doc.ref);
+      await batch.commit();
+    }
+  }
+
+  async saveOAuthToken(token: OAuthTokenRecord) {
+    await this.oauth("oauthTokens")
+      .doc(token.hash)
+      .create({ ...token, expireAt: new Date(token.expiresAt) });
+  }
+
+  async getOAuthToken(hash: string) {
+    return record<OAuthTokenRecord>(await this.oauth("oauthTokens").doc(hash).get());
+  }
+
+  async rotateRefreshToken(hash: string, at: number) {
+    const ref = this.oauth("oauthTokens").doc(hash);
+    return this.db.runTransaction(async (tx) => {
+      const found = record<OAuthTokenRecord>(await tx.get(ref));
+      if (found && found.kind === "refresh" && found.rotatedAt === null) {
+        const keepUntil = Math.min(found.expiresAt, at + ROTATED_KEEP_MS);
+        tx.update(ref, { rotatedAt: at, expireAt: new Date(keepUntil) });
+      }
+      return found;
+    });
+  }
+
+  async deleteOAuthToken(hash: string) {
+    await this.oauth("oauthTokens").doc(hash).delete();
   }
 }

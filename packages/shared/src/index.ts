@@ -11,7 +11,11 @@ export const LIMITS = {
   tokensPerUser: 10,
   historyMax: 50,
   audioWindowMaxMs: 60_000,
+  oauthGrantsPerUser: 20,
 } as const;
+
+/** The one OAuth scope. It covers every MCP tool: read code, history and sound, and write the plan. */
+export const OAUTH_SCOPE = "jam";
 
 // ---------- Domain ----------
 
@@ -100,6 +104,33 @@ export type CreateTokenRequest = z.input<typeof createTokenRequestSchema>;
 
 export const createTokenResponseSchema = tokenInfoSchema.extend({ token: z.string() });
 export type CreateTokenResponse = z.infer<typeof createTokenResponseSchema>;
+
+// ---------- OAuth (claude.ai and ChatGPT connectors) ----------
+
+/** An app the user connected through OAuth, as listed in the side panel. */
+export const grantInfoSchema = z.object({
+  id: z.string(),
+  clientName: z.string(),
+  createdAt: z.string(),
+  lastUsedAt: z.string().nullable(),
+});
+export type GrantInfo = z.infer<typeof grantInfoSchema>;
+
+/** What the consent page shows about a pending authorization request. */
+export const consentRequestInfoSchema = z.object({
+  clientName: z.string(),
+  /** The host the browser goes back to after Allow or Deny. */
+  redirectHost: z.string(),
+  scopes: z.array(z.string()),
+  expiresAt: z.string(),
+});
+export type ConsentRequestInfo = z.infer<typeof consentRequestInfoSchema>;
+
+export const consentDecisionRequestSchema = z.object({ allow: z.boolean() });
+export type ConsentDecisionRequest = z.infer<typeof consentDecisionRequestSchema>;
+
+export const consentDecisionResponseSchema = z.object({ redirectTo: z.string() });
+export type ConsentDecisionResponse = z.infer<typeof consentDecisionResponseSchema>;
 
 export interface ApiError {
   error: string;
