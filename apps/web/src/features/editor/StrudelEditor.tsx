@@ -6,6 +6,8 @@ export interface StrudelEditorHandle {
   play(): Promise<void>;
   stop(): Promise<void>;
   setCode(code: string): void;
+  /** Cycles per second of the running scheduler, or null before Strudel loads. */
+  getCps(): number | null;
 }
 
 interface Props {
@@ -48,6 +50,7 @@ export function StrudelEditor({ initialCode, onEvaluated, onStateChange, onLoadE
     play: async () => mirrorRef.current?.evaluate(),
     stop: async () => mirrorRef.current?.stop(),
     setCode: (code) => mirrorRef.current?.setCode(code),
+    getCps: () => mirrorRef.current?.repl?.scheduler?.cps ?? null,
   }));
 
   useEffect(() => {
