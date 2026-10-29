@@ -25,10 +25,14 @@ export default defineConfig({
       "/register": API,
       "/token": API,
       "/revoke": API,
-      // The server handles /authorize?client_id=...; the consent page (/authorize?request=...) is this app.
+      // The server handles /authorize?client_id=...; the consent page (/authorize?request=...) is this app,
+      // and so is its dev-only fixture (/authorize?preview=...).
       "/authorize": {
         target: API,
-        bypass: (req) => (new URL(req.url ?? "/", "http://x").searchParams.has("request") ? "/index.html" : undefined),
+        bypass: (req) => {
+          const params = new URL(req.url ?? "/", "http://x").searchParams;
+          return params.has("request") || params.has("preview") ? "/index.html" : undefined;
+        },
       },
     },
   },

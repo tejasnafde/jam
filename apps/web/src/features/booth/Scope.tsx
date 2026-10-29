@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 
 const OIL = "#FF8A3D";
 const WATER = "#3CCFC0";
-const BORDER = "#2C2838";
+const BORDER = "#4D465E";
 
 /** Sizes the canvas to its box at device resolution and returns the 2D context. */
 function fit(canvas: HTMLCanvasElement) {
@@ -94,12 +94,8 @@ export function Scope({
 
   return (
     <div className="space-y-2">
-      <canvas
-        ref={canvas}
-        className="block h-24 w-full rounded-md border border-border bg-background"
-        aria-hidden="true"
-      />
-      <div className="h-1.5 overflow-hidden rounded-full bg-border" title="Input level" aria-hidden="true">
+      <canvas ref={canvas} className="block h-24 w-full rounded-md bg-well" aria-hidden="true" />
+      <div className="h-1 overflow-hidden rounded-full bg-secondary" title="Input level" aria-hidden="true">
         <div ref={level} className="h-full origin-left scale-x-0 rounded-full" />
       </div>
     </div>
