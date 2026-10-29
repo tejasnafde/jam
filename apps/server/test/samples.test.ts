@@ -148,17 +148,14 @@ describe("samples API hardening", () => {
     const [a, b] = [await ask(), await ask()];
     for (const up of [a, b]) ctx.blobs.put(up.body.storagePath, 10);
     const reg = (up: typeof a) =>
-      request(ctx.app)
-        .post("/api/samples")
-        .set(ctx.asUser("alice"))
-        .send({
-          id: up.body.id,
-          name: "race",
-          kind: "take",
-          storagePath: up.body.storagePath,
-          contentType: "audio/wav",
-          durationSec: 1,
-        });
+      request(ctx.app).post("/api/samples").set(ctx.asUser("alice")).send({
+        id: up.body.id,
+        name: "race",
+        kind: "take",
+        storagePath: up.body.storagePath,
+        contentType: "audio/wav",
+        durationSec: 1,
+      });
     expect((await reg(a)).status).toBe(201);
     expect((await reg(b)).status).toBe(409);
     expect(ctx.blobs.objects.has(b.body.storagePath)).toBe(false);
