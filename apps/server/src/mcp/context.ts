@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { SoundIndex } from "../sounds/soundIndex.js";
+import type { PrepStore } from "../store/prep.js";
 import type { Store } from "../store/types.js";
 
 /** What every tool needs: the caller's uid and the services. */
@@ -7,6 +8,7 @@ export interface ToolContext {
   uid: string;
   store: Store;
   sounds: SoundIndex;
+  prep: PrepStore;
 }
 
 export type ToolRegistrar = (server: McpServer, ctx: ToolContext) => void;

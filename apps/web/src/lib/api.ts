@@ -2,6 +2,8 @@ import type {
   CodeVersion,
   CreateTokenRequest,
   CreateTokenResponse,
+  PrepRequestBody,
+  PrepStatusResponse,
   SaveAudioRequest,
   SaveVersionResponse,
   SessionPlan,
@@ -42,6 +44,8 @@ export function createApi(getIdToken: GetIdToken, base = "/api") {
     listTokens: () => call<TokenInfo[]>("/tokens"),
     createToken: (body: CreateTokenRequest) => post<CreateTokenResponse>("/tokens", body),
     revokeToken: (id: string) => call<null>(`/tokens/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    startPrep: (body: PrepRequestBody) => post<{ jobId: string }>("/prep", body),
+    prepStatus: (jobId: string) => call<PrepStatusResponse>(`/prep/${encodeURIComponent(jobId)}`),
   };
 }
 

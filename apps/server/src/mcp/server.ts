@@ -8,6 +8,7 @@ import type { ToolContext, ToolRegistrar } from "./context.js";
 import { registerStartSession } from "./prompts/startSession.js";
 import { registerGetAudioSnapshot } from "./tools/getAudioSnapshot.js";
 import { registerGetCurrentCode } from "./tools/getCurrentCode.js";
+import { registerGetPrepStatus } from "./tools/getPrepStatus.js";
 import { registerGetHistory } from "./tools/getHistory.js";
 import { registerGetSessionPlan } from "./tools/getSessionPlan.js";
 import { registerLookupSound } from "./tools/lookupSound.js";
@@ -22,6 +23,7 @@ const TOOLS: Record<string, ToolRegistrar> = {
   get_session_plan: registerGetSessionPlan,
   set_session_plan: registerSetSessionPlan,
   set_stage: registerSetStage,
+  get_prep_status: registerGetPrepStatus,
 };
 
 export const TOOL_NAMES = Object.keys(TOOLS);

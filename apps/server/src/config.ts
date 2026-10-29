@@ -4,6 +4,8 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(8080),
   GOOGLE_CLOUD_PROJECT: z.string().min(1).default("teejayproject"),
   FIRESTORE_DATABASE: z.string().min(1).default("jam-db"),
+  GOOGLE_CLOUD_REGION: z.string().min(1).default("asia-south1"),
+  PREP_JOB: z.string().min(1).default("jam-prep"),
   STATIC_DIR: z.string().optional(),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
 });
