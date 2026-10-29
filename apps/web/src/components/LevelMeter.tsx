@@ -5,7 +5,10 @@ import { cn } from "@/lib/utils";
 const BANDS = ["low", "mid", "high"] as const;
 const FLOOR = 0.12;
 
-/** Three bars (low, mid, high) driven by the live analyser while playing. */
+/**
+ * Three bars (low, mid, high) in a dark well, driven by the live analyser while
+ * playing. Low and mid are oil, high is water: the two halves of the logo.
+ */
 export function LevelMeter({ playing }: { playing: boolean }) {
   const bars = useRef<(HTMLSpanElement | null)[]>([]);
 
@@ -27,7 +30,11 @@ export function LevelMeter({ playing }: { playing: boolean }) {
   }, [playing]);
 
   return (
-    <div className="flex h-[22px] items-end gap-[3px]" aria-hidden="true" title="Output level">
+    <div
+      className="flex h-9 items-end gap-1 rounded-md bg-well px-2 py-1.5 ring-1 ring-hairline ring-inset"
+      aria-hidden="true"
+      title="Output level: low, mid, high"
+    >
       {BANDS.map((band, i) => (
         <span
           key={band}
@@ -35,7 +42,7 @@ export function LevelMeter({ playing }: { playing: boolean }) {
             bars.current[i] = el;
           }}
           className={cn(
-            "h-full w-[5px] origin-bottom scale-y-[0.12] rounded-[3px] bg-border transition-transform duration-75 ease-linear",
+            "h-full w-1.5 origin-bottom scale-y-[0.12] rounded-[2px] bg-gutter transition-transform duration-75 ease-linear",
             playing && (band === "high" ? "bg-water" : "bg-oil"),
           )}
         />

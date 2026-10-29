@@ -2,7 +2,6 @@ import type { ConsentRequestInfo } from "@jam/shared";
 import { Ban, Check } from "lucide-react";
 import { Logo } from "@/components/Logo";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import type { Profile } from "@/features/auth/authContext";
 import { GoogleIcon } from "@/features/auth/GoogleIcon";
 
@@ -34,72 +33,76 @@ function Body(props: ConsentViewProps) {
   if (error) {
     return (
       <div className="flex flex-col gap-2">
-        <h1 className="text-lg font-semibold">This request cannot continue</h1>
-        <p className="text-sm text-muted-foreground">{error}</p>
-        <p className="text-sm text-muted-foreground">Go back to the app and connect jam again.</p>
+        <h1 className="text-2xl leading-tight font-semibold tracking-tight">This request cannot continue</h1>
+        <p className="text-sm leading-relaxed text-muted-foreground">{error}</p>
+        <p className="text-sm leading-relaxed text-muted-foreground">Go back to the app and connect jam again.</p>
       </div>
     );
   }
   if (!info) return <p className="text-sm text-muted-foreground">Loading the request.</p>;
 
   return (
-    <div className="flex flex-col gap-5">
-      <div className="flex flex-col gap-1">
-        <h1 className="text-lg font-semibold">Connect {info.clientName} to jam?</h1>
-        <p className="text-sm text-muted-foreground">
+    <div className="flex flex-col gap-7">
+      <div className="flex flex-col gap-2">
+        <h1 className="text-2xl leading-tight font-semibold tracking-tight">Connect {info.clientName} to jam?</h1>
+        <p className="text-sm leading-relaxed text-muted-foreground">
           After you answer, you go back to <span className="font-mono text-foreground">{info.redirectHost}</span>.
         </p>
       </div>
 
-      <div className="flex flex-col gap-2">
-        <p className="text-xs font-medium tracking-[0.06em] text-muted-foreground uppercase">It can</p>
-        <ul className="flex flex-col gap-1.5" aria-label="It can">
+      <div className="flex flex-col gap-3">
+        <p className="text-sm font-semibold text-water">It can</p>
+        <ul className="flex flex-col gap-2" aria-label="It can">
           {CAN.map((line) => (
-            <li key={line} className="flex items-start gap-2 text-sm">
+            <li key={line} className="flex items-start gap-2.5 text-sm">
               <Check className="mt-0.5 size-4 flex-none text-water" aria-hidden="true" />
               {line}
             </li>
           ))}
         </ul>
-        <p className="pt-2 text-xs font-medium tracking-[0.06em] text-muted-foreground uppercase">It can never</p>
-        <p className="flex items-start gap-2 text-sm">
+        <p className="pt-2 text-sm font-semibold text-oil">It can never</p>
+        <p className="flex items-start gap-2.5 text-sm">
           <Ban className="mt-0.5 size-4 flex-none text-oil" aria-hidden="true" />
           Change your music. jam has no tool that writes code.
         </p>
       </div>
 
-      {profile ? (
-        <div className="flex flex-col gap-3">
-          <p className="text-xs text-muted-foreground">
-            Signed in as <span className="text-foreground">{profile.email || profile.name}</span>.{" "}
-            <button
-              type="button"
-              className="underline underline-offset-2 hover:text-foreground"
-              onClick={props.onSignOut}
-            >
-              Use another account
-            </button>
-          </p>
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" size="lg" disabled={busy} onClick={() => props.onDecide(false)}>
-              Deny
-            </Button>
-            <Button size="lg" disabled={busy} onClick={() => props.onDecide(true)}>
-              Allow
+      <div className="border-t border-hairline pt-5">
+        {profile ? (
+          <div className="flex flex-col gap-4">
+            <p className="text-xs text-muted-foreground">
+              Signed in as <span className="text-foreground">{profile.email || profile.name}</span>.{" "}
+              <button
+                type="button"
+                className="rounded-sm underline underline-offset-2 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+                onClick={props.onSignOut}
+              >
+                Use another account
+              </button>
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" size="lg" disabled={busy} onClick={() => props.onDecide(false)}>
+                Deny
+              </Button>
+              <Button size="lg" className="min-w-24 font-bold" disabled={busy} onClick={() => props.onDecide(true)}>
+                Allow
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col items-start gap-3">
+            <p className="text-sm leading-relaxed text-muted-foreground">
+              Sign in to choose which jam account to connect.
+            </p>
+            <Button size="lg" variant="secondary" disabled={!authReady} onClick={props.onSignIn}>
+              <GoogleIcon />
+              Sign in with Google
             </Button>
           </div>
-        </div>
-      ) : (
-        <div className="flex flex-col gap-3">
-          <p className="text-sm text-muted-foreground">Sign in to choose which jam account to connect.</p>
-          <Button size="lg" variant="secondary" disabled={!authReady} onClick={props.onSignIn}>
-            <GoogleIcon />
-            Sign in with Google
-          </Button>
-        </div>
-      )}
+        )}
+      </div>
 
-      <p className="text-xs text-muted-foreground">
+      <p className="text-xs leading-relaxed text-muted-foreground">
         You can disconnect it at any time on the jam page, under Connect an assistant.
       </p>
     </div>
@@ -109,16 +112,18 @@ function Body(props: ConsentViewProps) {
 /** The OAuth consent page. Pure: ConsentPage supplies the data and the actions. */
 export function ConsentView(props: ConsentViewProps) {
   return (
-    <div className="flex min-h-dvh flex-col items-center justify-center gap-6 bg-background p-4">
-      <a href="/" className="flex items-center gap-2 text-[22px] font-bold tracking-tight" aria-label="jam home">
-        <Logo className="size-8" />
-        <span>jam</span>
-      </a>
-      <Card className="w-full max-w-md py-5">
-        <CardContent className="px-5">
-          <Body {...props} />
-        </CardContent>
-      </Card>
+    <div className="flex min-h-dvh flex-col bg-background">
+      <main className="mx-auto flex w-full max-w-md flex-1 flex-col gap-8 px-5 py-10 sm:py-16">
+        <a
+          href="/"
+          className="flex w-fit items-center gap-2 rounded-md text-[22px] font-bold tracking-tight outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+          aria-label="jam home"
+        >
+          <Logo className="size-8" />
+          <span>jam</span>
+        </a>
+        <Body {...props} />
+      </main>
     </div>
   );
 }

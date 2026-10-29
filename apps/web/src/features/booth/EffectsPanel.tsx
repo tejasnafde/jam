@@ -30,7 +30,7 @@ function Knob(props: {
   disabled: boolean;
 }) {
   return (
-    <div className="grid grid-cols-[88px_1fr_56px] items-center gap-3">
+    <div className="grid grid-cols-[80px_1fr_56px] items-center gap-3">
       <span className="text-xs text-muted-foreground">{props.label}</span>
       <Slider
         aria-label={props.label}
@@ -72,37 +72,40 @@ function Pick<T extends string>(props: {
 const hz = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : `${Math.round(v)}`);
 const pct = (v: number) => `${Math.round(v * 100)}%`;
 
-/** One card per effect: a bypass switch and its controls. */
+/**
+ * The signal chain, top to bottom. Each effect is a row with a bypass switch;
+ * an effect that is on lights its left edge in oil and shows its controls.
+ */
 export function EffectsPanel({ fx, onChange }: { fx: Effects; onChange: (fx: Effects) => void }) {
   const set = <N extends Name>(name: N, patch: Partial<Effects[N]>) =>
     onChange({ ...fx, [name]: { ...fx[name], ...patch } });
 
-  const card = (name: Name, body: ReactNode) => {
+  const row = (name: Name, body: ReactNode) => {
     const on = fx[name].on;
     const id = `fx-${name}`;
     return (
       <section
         key={name}
         className={cn(
-          "space-y-3 rounded-lg border border-border p-3 transition-colors",
-          on && "border-oil/40 bg-oil/5",
+          "border-l-2 border-transparent py-2.5 pl-3 transition-colors",
+          on ? "border-oil" : "border-hairline",
         )}
       >
         <div className="flex items-center justify-between">
-          <Label htmlFor={id} className={cn("text-sm", !on && "text-muted-foreground")}>
+          <Label htmlFor={id} className={cn("text-sm", on ? "font-medium" : "text-muted-foreground")}>
             {TITLES[name]}
           </Label>
           <Switch id={id} checked={on} onCheckedChange={(v) => set(name, { on: v })} />
         </div>
-        {on && body}
+        {on && <div className="mt-3 space-y-3">{body}</div>}
       </section>
     );
   };
 
   const a = fx.autotune;
   return (
-    <div className="space-y-2">
-      {card(
+    <div className="flex flex-col">
+      {row(
         "autotune",
         <>
           <div className="flex gap-2">
@@ -133,7 +136,7 @@ export function EffectsPanel({ fx, onChange }: { fx: Effects; onChange: (fx: Eff
           />
         </>,
       )}
-      {card(
+      {row(
         "octave",
         <>
           <div className="flex gap-2">
@@ -157,7 +160,7 @@ export function EffectsPanel({ fx, onChange }: { fx: Effects; onChange: (fx: Eff
           />
         </>,
       )}
-      {card(
+      {row(
         "highpass",
         <Knob
           label="Cutoff Hz"
@@ -170,7 +173,7 @@ export function EffectsPanel({ fx, onChange }: { fx: Effects; onChange: (fx: Eff
           disabled={!fx.highpass.on}
         />,
       )}
-      {card(
+      {row(
         "lowpass",
         <Knob
           label="Cutoff Hz"
@@ -183,7 +186,7 @@ export function EffectsPanel({ fx, onChange }: { fx: Effects; onChange: (fx: Eff
           disabled={!fx.lowpass.on}
         />,
       )}
-      {card(
+      {row(
         "distortion",
         <Knob
           label="Drive"
@@ -196,11 +199,11 @@ export function EffectsPanel({ fx, onChange }: { fx: Effects; onChange: (fx: Eff
           disabled={!fx.distortion.on}
         />,
       )}
-      {card(
+      {row(
         "delay",
         <>
-          <div className="flex items-center gap-2">
-            <span className="w-[88px] text-xs text-muted-foreground">Time</span>
+          <div className="flex items-center gap-3">
+            <span className="w-[80px] text-xs text-muted-foreground">Time</span>
             <Pick
               label="Delay time"
               value={fx.delay.division}
@@ -231,7 +234,7 @@ export function EffectsPanel({ fx, onChange }: { fx: Effects; onChange: (fx: Eff
           />
         </>,
       )}
-      {card(
+      {row(
         "reverb",
         <>
           <Knob
