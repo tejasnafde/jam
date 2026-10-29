@@ -4,6 +4,7 @@ import { SidePanel, type SidePanelProps } from "@/components/SidePanel";
 import { TopBar } from "@/components/TopBar";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/features/auth/authContext";
+import { Booth } from "@/features/booth/Booth";
 import { UserAvatar } from "@/features/auth/UserAvatar";
 import { useTokens } from "@/features/connect/useTokens";
 import { EditorPane } from "@/features/editor/EditorPane";
@@ -65,6 +66,7 @@ export function App({ panelOverride }: { panelOverride?: PanelOverride }) {
         panelOpen={panelOpen}
         onTogglePanel={() => setPanelOpen(!panelOpen)}
         status={<SaveStatus status={status.value} stamp={status.stamp} />}
+        tools={<Booth getCps={() => editor.current?.getCps() ?? null} />}
         account={account}
       />
       <main

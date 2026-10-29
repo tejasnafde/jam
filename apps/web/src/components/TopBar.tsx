@@ -12,10 +12,11 @@ interface Props {
   panelOpen: boolean;
   onTogglePanel: () => void;
   status: ReactNode;
+  tools?: ReactNode;
   account: ReactNode;
 }
 
-export function TopBar({ playing, onTogglePlay, panelOpen, onTogglePanel, status, account }: Props) {
+export function TopBar({ playing, onTogglePlay, panelOpen, onTogglePanel, status, tools, account }: Props) {
   return (
     <header className="sticky top-0 z-10 flex h-14 flex-none items-center gap-3 border-b border-border bg-background px-3 md:gap-4 md:px-4">
       <a href="/" className="flex items-center gap-2 text-[22px] font-bold tracking-tight" aria-label="jam home">
@@ -29,6 +30,7 @@ export function TopBar({ playing, onTogglePlay, panelOpen, onTogglePanel, status
       </span>
       <div className="flex-1" />
       {status}
+      {tools}
       <Tooltip>
         <TooltipTrigger asChild>
           <Button

@@ -1,0 +1,292 @@
+import { SampleName } from "@jam/shared";
+import { Headphones, Loader2, Mic, Play, Save, Square } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { useAuth } from "@/features/auth/authContext";
+import { auth } from "@/lib/firebase";
+import { cn } from "@/lib/utils";
+import { DRY, opsFor, preset, renderTake, type Effects, type PresetName } from "./effects";
+import { EffectsPanel } from "./EffectsPanel";
+import { saveTake } from "./saveTake";
+import { Scope } from "./Scope";
+import { useRecorder, type Take } from "./useRecorder";
+
+const PRESETS: PresetName[] = ["dry", "far away", "hard tune", "dark double"];
+const COUNT_INS = { off: 0, "1 bar": 4, "2 bars": 8 } as const;
+type CountIn = keyof typeof COUNT_INS;
+
+const getIdToken = async () => {
+  const user = auth.currentUser;
+  if (!user) throw new Error("Sign in to save takes");
+  return user.getIdToken();
+};
+
+const defaultName = () => {
+  const d = new Date();
+  return `take_${String(d.getHours()).padStart(2, "0")}${String(d.getMinutes()).padStart(2, "0")}`;
+};
+
+function Elapsed({ since }: { since: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(id);
+  }, []);
+  const s = Math.max(0, Math.floor((now - since) / 1000));
+  return (
+    <span className="font-mono text-sm tabular-nums text-oil">{`${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`}</span>
+  );
+}
+
+/**
+ * The vocal booth: record from the mic, shape the take with effects, preview it,
+ * and save it to the sample library so Strudel can play it with s("name").
+ */
+export function Booth({ getCps }: { getCps: () => number | null }) {
+  const { profile } = useAuth();
+  const [open, setOpen] = useState(false);
+  const [take, setTake] = useState<Take | null>(null);
+  const [fx, setFx] = useState<Effects>(DRY);
+  const [bpm, setBpm] = useState(120);
+  const [bpmFromStrudel, setBpmFromStrudel] = useState(false);
+  const [countIn, setCountIn] = useState<CountIn>("1 bar");
+  const [name, setName] = useState(defaultName);
+  const [busy, setBusy] = useState<"render" | "save" | null>(null);
+  const [playing, setPlaying] = useState(false);
+  const rendered = useRef<{ key: string; take: Take; audio: AudioBuffer } | null>(null);
+  const player = useRef<{ ctx: AudioContext; src: AudioBufferSourceNode | null } | null>(null);
+  const mic = useRecorder((t) => {
+    setTake(t);
+    setName(defaultName());
+  });
+
+  const stopPreview = () => {
+    const p = player.current;
+    if (p?.src) {
+      p.src.onended = null;
+      p.src.stop();
+      p.src = null;
+    }
+    setPlaying(false);
+  };
+
+  const onOpenChange = (next: boolean) => {
+    setOpen(next);
+    if (next) {
+      const cps = getCps();
+      if (cps && cps > 0) setBpm(Math.round(cps * 240));
+      setBpmFromStrudel(Boolean(cps));
+    } else {
+      stopPreview();
+      mic.release();
+    }
+  };
+
+  /** Renders the take with the current settings, reusing the last render if nothing changed. */
+  async function render(): Promise<AudioBuffer | null> {
+    if (!take) return null;
+    const key = JSON.stringify({ fx, bpm });
+    const last = rendered.current;
+    if (last && last.key === key && last.take === take) return last.audio;
+    setBusy("render");
+    // Let the spinner paint: pitch work runs on the main thread.
+    // ponytail: main thread; move pitchStage into a Worker if long takes freeze the page.
+    await new Promise((r) => setTimeout(r, 30));
+    try {
+      const audio = await renderTake(take.data, take.sampleRate, fx, bpm);
+      rendered.current = { key, take, audio };
+      return audio;
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function togglePreview() {
+    if (playing) return stopPreview();
+    const audio = await render();
+    if (!audio) return;
+    player.current ??= { ctx: new AudioContext(), src: null };
+    const p = player.current;
+    await p.ctx.resume();
+    const src = new AudioBufferSourceNode(p.ctx, { buffer: audio });
+    src.connect(p.ctx.destination);
+    src.onended = () => setPlaying(false);
+    src.start();
+    p.src = src;
+    setPlaying(true);
+  }
+
+  const nameOk = SampleName.safeParse(name).success;
+
+  async function save() {
+    const audio = await render();
+    if (!audio) return;
+    setBusy("save");
+    try {
+      const a = fx.autotune;
+      await saveTake(getIdToken, audio, {
+        name,
+        ops: opsFor(fx, bpm),
+        bpm: bpmFromStrudel || countIn !== "off" ? bpm : undefined,
+        key: a.on ? `${a.key} ${a.scale}` : undefined,
+      });
+      toast.success(`Saved "${name}"`, { description: `Play it with s("${name}")` });
+    } catch (err) {
+      toast.error("The take did not save", { description: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  useEffect(() => () => void player.current?.ctx.close(), []);
+
+  const recording = mic.phase === "recording" || mic.phase === "counting";
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetTrigger asChild>
+        <Button
+          variant="ghost"
+          size="sm"
+          aria-label="Vocal booth"
+          className="gap-1.5 text-muted-foreground hover:text-foreground"
+        >
+          <Mic className="size-4" />
+          <span className="max-sm:hidden">Booth</span>
+        </Button>
+      </SheetTrigger>
+      <SheetContent className="gap-0 overflow-y-auto data-[side=right]:w-full data-[side=right]:sm:max-w-md">
+        <SheetHeader className="border-b border-border">
+          <SheetTitle>Vocal booth</SheetTitle>
+          <SheetDescription>Record a take, shape it, and save it as a sample for Strudel.</SheetDescription>
+        </SheetHeader>
+
+        <div className="space-y-5 p-4">
+          <p className="flex items-start gap-2 rounded-lg border border-water/30 bg-water/5 p-3 text-sm">
+            <Headphones className="mt-0.5 size-4 flex-none text-water" />
+            <span>Wear headphones. Speakers leak into the mic, and the count-in clicks get on the take.</span>
+          </p>
+
+          <section className="space-y-3">
+            <Scope analyser={recording || !take ? mic.analyser : null} take={take?.data ?? null} hot={recording} />
+            {mic.phase === "off" || mic.phase === "asking" || mic.phase === "denied" ? (
+              <div className="space-y-2">
+                <Button onClick={() => void mic.enable()} disabled={mic.phase === "asking"} className="w-full">
+                  {mic.phase === "asking" ? <Loader2 className="animate-spin" /> : <Mic />}
+                  {mic.phase === "asking" ? "Waiting for permission" : "Allow microphone"}
+                </Button>
+                {mic.phase === "denied" && (
+                  <p className="text-sm text-destructive" role="alert">
+                    The microphone is blocked. Allow it in the site settings of your browser, then try again.
+                  </p>
+                )}
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center gap-3">
+                <Button
+                  onClick={() => (recording ? mic.stop() : mic.record(COUNT_INS[countIn], bpm))}
+                  variant={recording ? "default" : "outline"}
+                  className="min-w-28"
+                  aria-label={recording ? "Stop recording" : "Record"}
+                >
+                  {recording ? <Square className="fill-current" /> : <span className="size-3 rounded-full bg-oil" />}
+                  {mic.phase === "counting" ? "Count-in" : recording ? "Stop" : "Record"}
+                </Button>
+                {mic.phase === "recording" && <Elapsed since={mic.startedAt} />}
+                <div className="ml-auto flex items-center gap-2">
+                  <Label className="text-xs text-muted-foreground">Count-in</Label>
+                  <Select value={countIn} onValueChange={(v) => setCountIn(v as CountIn)} disabled={recording}>
+                    <SelectTrigger size="sm" aria-label="Count-in" className="w-24">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Object.keys(COUNT_INS).map((k) => (
+                        <SelectItem key={k} value={k}>
+                          {k}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Label htmlFor="booth-bpm" className="text-xs text-muted-foreground">
+                Tempo
+              </Label>
+              <Input
+                id="booth-bpm"
+                type="number"
+                min={40}
+                max={220}
+                value={bpm}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  if (v >= 40 && v <= 220) setBpm(v);
+                  setBpmFromStrudel(false);
+                }}
+                className="h-7 w-20 font-mono"
+                disabled={recording}
+              />
+              <span>bpm{bpmFromStrudel ? ", from Strudel" : ""}. Count-in and delay follow it.</span>
+            </div>
+          </section>
+
+          {take && !recording && (
+            <>
+              <section className="space-y-3">
+                <h3 className="text-sm font-medium">Effects</h3>
+                <div className="flex flex-wrap gap-2">
+                  {PRESETS.map((p) => (
+                    <Button key={p} variant="outline" size="sm" onClick={() => setFx(preset(p, fx))}>
+                      {p}
+                    </Button>
+                  ))}
+                </div>
+                <EffectsPanel fx={fx} onChange={setFx} />
+              </section>
+
+              <section className="sticky bottom-0 -mx-4 space-y-3 border-t border-border bg-background p-4">
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" onClick={() => void togglePreview()} disabled={busy !== null}>
+                    {busy === "render" ? <Loader2 className="animate-spin" /> : playing ? <Square /> : <Play />}
+                    {playing ? "Stop" : "Preview"}
+                  </Button>
+                  <span className="text-xs text-muted-foreground">
+                    {take.data.length / take.sampleRate < 1
+                      ? ""
+                      : `${(take.data.length / take.sampleRate).toFixed(1)} s take`}
+                  </span>
+                </div>
+                <div className="flex items-start gap-2">
+                  <div className="flex-1 space-y-1">
+                    <Input
+                      aria-label="Sample name"
+                      value={name}
+                      onChange={(e) => setName(e.target.value.toLowerCase())}
+                      aria-invalid={!nameOk}
+                      className="font-mono"
+                    />
+                    <p className={cn("text-xs", nameOk ? "text-muted-foreground" : "text-destructive")}>
+                      {nameOk ? `Plays with s("${name}")` : "2 to 40 characters: a-z first, then a-z, 0-9 or _"}
+                    </p>
+                  </div>
+                  <Button onClick={() => void save()} disabled={!nameOk || busy !== null || !profile}>
+                    {busy === "save" ? <Loader2 className="animate-spin" /> : <Save />}
+                    Save
+                  </Button>
+                </div>
+                {!profile && <p className="text-xs text-muted-foreground">Sign in to save takes to your library.</p>}
+              </section>
+            </>
+          )}
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
+}
