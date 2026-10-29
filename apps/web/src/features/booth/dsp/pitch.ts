@@ -67,6 +67,8 @@ export function pitchTrack(input: Float32Array, sampleRate: number): Float32Arra
  * the window is a whole number of periods, so both taps stay in phase and
  * the splices do not detune the voice. The window is centered, so the output
  * has no added latency (offline only: it reads ahead).
+ * Each tap moves its own read offset smoothly and jumps by a window only at
+ * its zero gain, so a window change never moves an audible tap (no clicks).
  * ponytail: delay-line granular shifter, not full PSOLA (no formant care).
  */
 export function shiftPitch(
@@ -83,16 +85,28 @@ export function shiftPitch(
     const f = pos - i;
     return (input[i] ?? 0) * (1 - f) + (input[i + 1] ?? 0) * f;
   };
-  let phase = 0;
-  for (let i = 0; i < input.length; i++) {
+  const windowAt = (i: number) => {
     const hz = track?.[Math.floor(i / HOP)] ?? 0;
     const period = hz > 0 ? sampleRate / hz : 0;
-    const win = period > 0 ? 2 * period * Math.max(1, Math.round(base / (2 * period))) : base;
-    phase += (1 - ratioAt(i)) / win;
-    phase -= Math.floor(phase);
-    const p2 = (phase + 0.5) % 1;
-    const g1 = Math.sin(Math.PI * phase) ** 2;
-    out[i] = g1 * at(i + win / 2 - phase * win) + (1 - g1) * at(i + win / 2 - p2 * win);
+    return period > 0 ? 2 * period * Math.max(1, Math.round(base / (2 * period))) : base;
+  };
+  // Per tap: the phase sets its gain, the offset (read position minus i) where it reads.
+  const w0 = windowAt(0);
+  const taps = [0, 0.5].map((phase) => ({ phase, offset: w0 * (0.5 - phase) }));
+  for (let i = 0; i < input.length; i++) {
+    const win = windowAt(i);
+    const ratio = ratioAt(i);
+    for (const t of taps) {
+      t.phase += (1 - ratio) / win;
+      t.offset += ratio - 1;
+      if (t.phase >= 1 || t.phase < 0) {
+        t.phase -= Math.floor(t.phase);
+        t.offset = win * (0.5 - t.phase); // gain is zero here, so the jump is silent
+      }
+    }
+    const [a, b] = taps as [(typeof taps)[0], (typeof taps)[0]];
+    const g = Math.sin(Math.PI * a.phase) ** 2;
+    out[i] = g * at(i + a.offset) + (1 - g) * at(i + b.offset);
   }
   return out;
 }
@@ -134,12 +148,11 @@ export interface TuneOptions {
   speed: number;
 }
 
-/** Pitch correction: per hop, snap the detected pitch to the scale and glide there at the retune speed. */
-export function autotune(input: Float32Array, sampleRate: number, { key, scale, speed }: TuneOptions): Float32Array {
-  const track = pitchTrack(input, sampleRate);
+/** Pitch correction curve in semitones per hop: snap the detected pitch to the scale and glide there at the retune speed. */
+export function tuneCurve(track: Float32Array, sampleRate: number, { key, scale, speed }: TuneOptions): Float32Array {
   const tc = 0.001 + (1 - speed) ** 2 * 0.3; // seconds
   const alpha = 1 - Math.exp(-HOP / sampleRate / tc);
-  const shift = new Float32Array(track.length); // semitones
+  const shift = new Float32Array(track.length);
   let cur = 0;
   track.forEach((hz, h) => {
     let want = 0;
@@ -150,5 +163,16 @@ export function autotune(input: Float32Array, sampleRate: number, { key, scale, 
     cur += (want - cur) * alpha;
     shift[h] = cur;
   });
+  return shift;
+}
+
+/** Pitch correction of `input`, whose pitch track is `track`. */
+export function autotune(
+  input: Float32Array,
+  sampleRate: number,
+  opts: TuneOptions,
+  track = pitchTrack(input, sampleRate),
+): Float32Array {
+  const shift = tuneCurve(track, sampleRate, opts);
   return shiftPitch(input, (i) => 2 ** ((shift[Math.floor(i / HOP)] ?? 0) / 12), sampleRate, track);
 }

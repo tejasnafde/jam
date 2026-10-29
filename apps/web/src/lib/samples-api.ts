@@ -1,32 +1,29 @@
-// Typed client for the sample library REST API (see packages/shared/src/samples.ts).
-import type { Sample } from "@jam/shared";
-import { ApiError, type GetIdToken } from "./api";
+import {
+  UPLOAD_SIZE_HEADERS,
+  type CreateUploadUrlBody,
+  type RegisterSample,
+  type Sample,
+  type SampleWithUrl,
+  type UploadUrlResponse,
+} from "@jam/shared";
+import type { Api } from "./api";
 
-export type SampleWithUrl = Sample & { url: string };
-export type NewSample = Omit<Sample, "userId" | "createdAt">;
+/** A typed client for the sample library (/api/samples). */
+export function samplesApi(api: Api) {
+  const post = <T>(path: string, body: unknown) => api.request<T>(path, { method: "POST", body: JSON.stringify(body) });
 
-async function call<T>(getIdToken: GetIdToken, path: string, init: RequestInit = {}): Promise<T> {
-  const headers = new Headers(init.headers);
-  headers.set("Authorization", `Bearer ${await getIdToken()}`);
-  if (init.body) headers.set("Content-Type", "application/json");
-  const res = await fetch(`/api/samples${path}`, { ...init, headers });
-  if (!res.ok) {
-    const body = (await res.json().catch(() => ({}))) as { message?: string; error?: string };
-    throw new ApiError(res.status, body.message ?? body.error ?? `HTTP ${res.status}`);
-  }
-  return (res.status === 204 ? null : await res.json()) as T;
+  return {
+    list: async () => (await api.request<{ samples: SampleWithUrl[] }>("/samples")).samples,
+    uploadUrl: (body: CreateUploadUrlBody) => post<UploadUrlResponse>("/samples/upload-url", body),
+    register: (body: RegisterSample) => post<Sample>("/samples", body),
+    remove: (id: string) => api.request<null>(`/samples/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    /** PUTs the file to a signed upload URL. The headers must match the ones the URL was signed with. */
+    async put(uploadUrl: string, file: Blob, contentType: Sample["contentType"]) {
+      const headers = { "Content-Type": contentType, ...UPLOAD_SIZE_HEADERS };
+      const res = await fetch(uploadUrl, { method: "PUT", headers, body: file });
+      if (!res.ok) throw new Error(`Upload failed: HTTP ${res.status}`);
+    },
+  };
 }
 
-export const createUploadUrl = (getIdToken: GetIdToken, body: Pick<Sample, "name" | "contentType">) =>
-  call<{ id: string; uploadUrl: string; storagePath: string }>(getIdToken, "/upload-url", {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
-
-export const registerSample = (getIdToken: GetIdToken, body: NewSample) =>
-  call<Sample>(getIdToken, "", { method: "POST", body: JSON.stringify(body) });
-
-export const listSamples = (getIdToken: GetIdToken) => call<{ samples: SampleWithUrl[] }>(getIdToken, "");
-
-export const deleteSample = (getIdToken: GetIdToken, id: string) =>
-  call<null>(getIdToken, `/${encodeURIComponent(id)}`, { method: "DELETE" });
+export type SamplesApi = ReturnType<typeof samplesApi>;

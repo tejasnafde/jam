@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DRY, opsFor, preset } from "./effects";
+import { DRY, opsFor, preset, tailSeconds } from "./effects";
 
 describe("presets and ops", () => {
   it("presets keep the chosen key and scale", () => {
@@ -19,5 +19,12 @@ describe("presets and ops", () => {
       "reverb:2.5s",
     ]);
     expect(opsFor(preset("far away", DRY), 100)).toContain("delay:1/4@100bpm");
+  });
+
+  it("adds the reverb tail to the delay tail", () => {
+    // far away at 120 bpm: echoes every 0.5 s at feedback 0.4 (5 repeats), then 4 s of reverb.
+    const tail = tailSeconds(preset("far away", DRY), 120);
+    expect(tail).toBeGreaterThan(6.5);
+    expect(tail).toBeLessThan(7);
   });
 });

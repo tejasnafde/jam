@@ -8,9 +8,10 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { useAuth } from "@/features/auth/authContext";
-import { auth } from "@/lib/firebase";
+import { toSampleName } from "@/features/library/sampleFile";
+import type { useSamples } from "@/features/library/useSamples";
 import { cn } from "@/lib/utils";
-import { DRY, opsFor, preset, renderTake, type Effects, type PresetName } from "./effects";
+import { DRY, needsPitch, opsFor, pitchInWorker, preset, renderTake, type Effects, type PresetName } from "./effects";
 import { EffectsPanel } from "./EffectsPanel";
 import { saveTake } from "./saveTake";
 import { Scope } from "./Scope";
@@ -20,11 +21,7 @@ const PRESETS: PresetName[] = ["dry", "far away", "hard tune", "dark double"];
 const COUNT_INS = { off: 0, "1 bar": 4, "2 bars": 8 } as const;
 type CountIn = keyof typeof COUNT_INS;
 
-const getIdToken = async () => {
-  const user = auth.currentUser;
-  if (!user) throw new Error("Sign in to save takes");
-  return user.getIdToken();
-};
+const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 const defaultName = () => {
   const d = new Date();
@@ -47,7 +44,7 @@ function Elapsed({ since }: { since: number }) {
  * The vocal booth: record from the mic, shape the take with effects, preview it,
  * and save it to the sample library so Strudel can play it with s("name").
  */
-export function Booth({ getCps }: { getCps: () => number | null }) {
+export function Booth({ getCps, library }: { getCps: () => number | null; library: ReturnType<typeof useSamples> }) {
   const { profile } = useAuth();
   const [open, setOpen] = useState(false);
   const [take, setTake] = useState<Take | null>(null);
@@ -59,10 +56,13 @@ export function Booth({ getCps }: { getCps: () => number | null }) {
   const [busy, setBusy] = useState<"render" | "save" | null>(null);
   const [playing, setPlaying] = useState(false);
   const rendered = useRef<{ key: string; take: Take; audio: AudioBuffer } | null>(null);
+  const tracks = useRef(new WeakMap<Take, Float32Array>()); // pitch track per take
+  const freeName = (base: string, also: string[] = []) =>
+    toSampleName(base, new Set([...library.samples.map((s) => s.name), ...also]));
   const player = useRef<{ ctx: AudioContext; src: AudioBufferSourceNode | null } | null>(null);
   const mic = useRecorder((t) => {
     setTake(t);
-    setName(defaultName());
+    setName(freeName(defaultName()));
   });
 
   const stopPreview = () => {
@@ -94,11 +94,15 @@ export function Booth({ getCps }: { getCps: () => number | null }) {
     const last = rendered.current;
     if (last && last.key === key && last.take === take) return last.audio;
     setBusy("render");
-    // Let the spinner paint: pitch work runs on the main thread.
-    // ponytail: main thread; move pitchStage into a Worker if long takes freeze the page.
-    await new Promise((r) => setTimeout(r, 30));
     try {
-      const audio = await renderTake(take.data, take.sampleRate, fx, bpm);
+      let x = take.data;
+      if (needsPitch(fx)) {
+        const job = { dry: take.data, sampleRate: take.sampleRate, fx, track: tracks.current.get(take) };
+        const done = await pitchInWorker(job);
+        tracks.current.set(take, done.track);
+        x = done.x;
+      }
+      const audio = await renderTake(x, take.sampleRate, fx, bpm);
       rendered.current = { key, take, audio };
       return audio;
     } finally {
@@ -108,36 +112,45 @@ export function Booth({ getCps }: { getCps: () => number | null }) {
 
   async function togglePreview() {
     if (playing) return stopPreview();
-    const audio = await render();
-    if (!audio) return;
-    player.current ??= { ctx: new AudioContext(), src: null };
-    const p = player.current;
-    await p.ctx.resume();
-    const src = new AudioBufferSourceNode(p.ctx, { buffer: audio });
-    src.connect(p.ctx.destination);
-    src.onended = () => setPlaying(false);
-    src.start();
-    p.src = src;
-    setPlaying(true);
+    try {
+      const audio = await render();
+      if (!audio) return;
+      player.current ??= { ctx: new AudioContext(), src: null };
+      const p = player.current;
+      await p.ctx.resume();
+      const src = new AudioBufferSourceNode(p.ctx, { buffer: audio });
+      src.connect(p.ctx.destination);
+      src.onended = () => setPlaying(false);
+      src.start();
+      p.src = src;
+      setPlaying(true);
+    } catch (err) {
+      toast.error("The preview did not play", { description: message(err) });
+    }
   }
 
   const nameOk = SampleName.safeParse(name).success;
 
   async function save() {
-    const audio = await render();
-    if (!audio) return;
-    setBusy("save");
+    const client = library.client;
+    if (!client) return;
     try {
+      const audio = await render();
+      if (!audio) return;
+      setBusy("save");
       const a = fx.autotune;
-      await saveTake(getIdToken, audio, {
+      await saveTake(client, audio, {
         name,
         ops: opsFor(fx, bpm),
         bpm: bpmFromStrudel || countIn !== "off" ? bpm : undefined,
         key: a.on ? `${a.key} ${a.scale}` : undefined,
       });
+      // Registers the new sample with Strudel before the toast says it plays.
+      await library.refresh().catch(console.error);
       toast.success(`Saved "${name}"`, { description: `Play it with s("${name}")` });
+      setName(freeName(name, [name])); // the next save of this take gets a new name
     } catch (err) {
-      toast.error("The take did not save", { description: err instanceof Error ? err.message : String(err) });
+      toast.error("The take did not save", { description: message(err) });
     } finally {
       setBusy(null);
     }
@@ -276,7 +289,10 @@ export function Booth({ getCps }: { getCps: () => number | null }) {
                       {nameOk ? `Plays with s("${name}")` : "2 to 40 characters: a-z first, then a-z, 0-9 or _"}
                     </p>
                   </div>
-                  <Button onClick={() => void save()} disabled={!nameOk || busy !== null || !profile}>
+                  <Button
+                    onClick={() => void save()}
+                    disabled={!nameOk || busy !== null || !profile || !library.client}
+                  >
                     {busy === "save" ? <Loader2 className="animate-spin" /> : <Save />}
                     Save
                   </Button>

@@ -107,3 +107,4 @@ export interface ApiError {
 }
 
 export * from "./samples.js";
+export * from "./sampleApi.js";

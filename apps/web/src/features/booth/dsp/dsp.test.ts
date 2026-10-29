@@ -50,6 +50,20 @@ describe("shiftPitch", () => {
     const out = shiftPitch(input, () => ratio, SR, pitchTrack(input, SR));
     expect(Math.abs(pitchOf(out) - 220 * ratio) / (220 * ratio)).toBeLessThan(0.02);
   });
+
+  it.each([0.5, 2])("does not click on a gliding sine at ratio %s", (ratio) => {
+    // 150 to 450 Hz in 1 s: the window changes every hop and flips its period count.
+    let ph = 0;
+    const input = Float32Array.from({ length: SR }, (_, i) => {
+      ph += (2 * Math.PI * (150 + (300 * i) / SR)) / SR;
+      return 0.5 * Math.sin(ph);
+    });
+    const out = shiftPitch(input, () => ratio, SR, pitchTrack(input, SR));
+    // The fastest clean output (900 Hz at 0.5 amplitude) moves 0.059 per sample.
+    let jump = 0;
+    for (let i = 1; i < out.length; i++) jump = Math.max(jump, Math.abs((out[i] ?? 0) - (out[i - 1] ?? 0)));
+    expect(jump).toBeLessThan(0.07);
+  });
 });
 
 describe("autotune", () => {

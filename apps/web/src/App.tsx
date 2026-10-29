@@ -7,6 +7,7 @@ import { useAuth } from "@/features/auth/authContext";
 import { Booth } from "@/features/booth/Booth";
 import { UserAvatar } from "@/features/auth/UserAvatar";
 import { useTokens } from "@/features/connect/useTokens";
+import { useSamples } from "@/features/library/useSamples";
 import { EditorPane } from "@/features/editor/EditorPane";
 import type { StrudelEditorHandle } from "@/features/editor/StrudelEditor";
 import type { SaveStatus as Status } from "@/features/editor/useEvaluationRecorder";
@@ -21,6 +22,7 @@ export function App({ panelOverride }: { panelOverride?: PanelOverride }) {
   const auth = useAuth();
   const plan = usePlan(auth.api);
   const tokens = useTokens(auth.api);
+  const library = useSamples(auth.api);
   const editor = useRef<StrudelEditorHandle | null>(null);
   const [playing, setPlaying] = useState(false);
   const [panelOpen, setPanelOpen] = useLocalStorageFlag("jam:panel", true);
@@ -37,6 +39,10 @@ export function App({ panelOverride }: { panelOverride?: PanelOverride }) {
     onSignOut: () => void auth.signOut(),
     onCreateToken: (label) => void tokens.create(label),
     onRevokeToken: (id) => void tokens.revoke(id),
+    samples: library.samples,
+    uploadingSample: library.uploading,
+    onUploadSample: (file) => void library.upload(file),
+    onDeleteSample: (id) => void library.remove(id),
     ...panelOverride,
   };
 
@@ -66,7 +72,7 @@ export function App({ panelOverride }: { panelOverride?: PanelOverride }) {
         panelOpen={panelOpen}
         onTogglePanel={() => setPanelOpen(!panelOpen)}
         status={<SaveStatus status={status.value} stamp={status.stamp} />}
-        tools={<Booth getCps={() => editor.current?.getCps() ?? null} />}
+        tools={<Booth getCps={() => editor.current?.getCps() ?? null} library={library} />}
         account={account}
       />
       <main

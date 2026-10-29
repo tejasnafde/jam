@@ -2,7 +2,7 @@
 // the raw take; the rest is a Web Audio graph rendered in an OfflineAudioContext,
 // so the preview and the saved WAV are the same audio.
 
-import { autotune, pitchTrack, shiftPitch, type Key, type Scale } from "./dsp/pitch";
+import { HOP, pitchTrack, shiftPitch, tuneCurve, type Key, type Scale } from "./dsp/pitch";
 
 export const DELAY_DIVISIONS = { "1/4": 1, "1/8": 0.5, "3/16": 0.75, "1/16": 0.25 } as const;
 export type DelayDivision = keyof typeof DELAY_DIVISIONS;
@@ -135,26 +135,42 @@ function buildChain(ctx: BaseAudioContext, input: AudioNode, fx: Effects, bpm: n
   return node;
 }
 
-/** Seconds of tail to render after the take ends. */
-function tailSeconds(fx: Effects, bpm: number): number {
+/** Seconds of tail to render after the take ends. The reverb follows the delay, so the tails add up. */
+export function tailSeconds(fx: Effects, bpm: number): number {
   let tail = 0.05;
-  if (fx.reverb.on) tail = Math.max(tail, fx.reverb.seconds);
   if (fx.delay.on) {
     const t = (60 / bpm) * DELAY_DIVISIONS[fx.delay.division];
     // Until the echoes fall below -40 dB.
     const repeats = fx.delay.feedback > 0 ? Math.log(0.01) / Math.log(fx.delay.feedback) : 1;
-    tail = Math.max(tail, Math.min(8, t * repeats));
+    tail += Math.min(8, t * repeats);
   }
-  return tail;
+  if (fx.reverb.on) tail += fx.reverb.seconds;
+  return Math.min(16, tail);
 }
 
-/** Applies pitch work offline. Exported for tests. */
-export function pitchStage(dry: Float32Array, sampleRate: number, fx: Effects): Float32Array {
+export const needsPitch = (fx: Effects) => fx.autotune.on || fx.octave.on;
+
+/**
+ * Applies pitch work offline. `track` is the dry take's pitch track: it does not
+ * depend on the settings, so callers cache it per take. Exported for tests.
+ */
+export function pitchStage(
+  dry: Float32Array,
+  sampleRate: number,
+  fx: Effects,
+  track = pitchTrack(dry, sampleRate),
+): Float32Array {
   let x = dry;
-  if (fx.autotune.on) x = autotune(x, sampleRate, fx.autotune);
+  let pitch = track;
+  if (fx.autotune.on) {
+    const shift = tuneCurve(track, sampleRate, fx.autotune);
+    const ratio = (h: number) => 2 ** ((shift[h] ?? 0) / 12);
+    x = shiftPitch(dry, (i) => ratio(Math.floor(i / HOP)), sampleRate, track);
+    pitch = track.map((hz, h) => hz * ratio(h)); // the tuned pitch, for the octave layer
+  }
   if (fx.octave.on) {
     const ratio = 2 ** (fx.octave.shift / 12);
-    const layer = shiftPitch(x, () => ratio, sampleRate, pitchTrack(x, sampleRate));
+    const layer = shiftPitch(x, () => ratio, sampleRate, pitch);
     const mixed = new Float32Array(x.length);
     for (let i = 0; i < x.length; i++) mixed[i] = (x[i] ?? 0) + fx.octave.level * (layer[i] ?? 0);
     x = mixed;
@@ -162,14 +178,25 @@ export function pitchStage(dry: Float32Array, sampleRate: number, fx: Effects): 
   return x;
 }
 
-/** Renders the processed take to a stereo buffer, peak-normalized below 0 dBFS if it would clip. */
-export async function renderTake(
-  dry: Float32Array,
-  sampleRate: number,
-  fx: Effects,
-  bpm: number,
-): Promise<AudioBuffer> {
-  const x = pitchStage(dry, sampleRate, fx);
+export interface PitchJob {
+  dry: Float32Array;
+  sampleRate: number;
+  fx: Effects;
+  track?: Float32Array;
+}
+
+/** Runs pitchStage in a Web Worker, so long takes do not freeze the page. Returns the track for the cache. */
+export function pitchInWorker(job: PitchJob): Promise<{ x: Float32Array; track: Float32Array }> {
+  const worker = new Worker(new URL("./pitch.worker.ts", import.meta.url), { type: "module" });
+  return new Promise<{ x: Float32Array; track: Float32Array }>((resolve, reject) => {
+    worker.onmessage = (e: MessageEvent<{ x: Float32Array; track: Float32Array }>) => resolve(e.data);
+    worker.onerror = (e) => reject(new Error(e.message || "The pitch worker failed"));
+    worker.postMessage(job);
+  }).finally(() => worker.terminate());
+}
+
+/** Renders the take (after pitchStage) to a stereo buffer, peak-normalized below 0 dBFS if it would clip. */
+export async function renderTake(x: Float32Array, sampleRate: number, fx: Effects, bpm: number): Promise<AudioBuffer> {
   const length = x.length + Math.ceil(tailSeconds(fx, bpm) * sampleRate);
   const ctx = new OfflineAudioContext(2, length, sampleRate);
   const buf = ctx.createBuffer(1, x.length, sampleRate);
