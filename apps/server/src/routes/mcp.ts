@@ -5,6 +5,7 @@ import type { Logger } from "../logger.js";
 import { buildMcpServer } from "../mcp/server.js";
 import type { SoundIndex } from "../sounds/soundIndex.js";
 import type { SampleStore } from "../store/samples.js";
+import type { PrepStore } from "../store/prep.js";
 import type { Store } from "../store/types.js";
 import { asyncHandler } from "./validate.js";
 
@@ -12,6 +13,7 @@ interface McpRouteDeps {
   store: Store;
   samples: SampleStore;
   sounds: SoundIndex;
+  prep: PrepStore;
   authenticators: McpAuthenticator[];
   log: Logger;
 }
@@ -24,7 +26,7 @@ const methodNotAllowed = (_req: Request, res: Response) => {
     .json({ jsonrpc: "2.0", error: { code: -32000, message: "Method not allowed." }, id: null });
 };
 
-export function mcpRouter({ store, samples, sounds, authenticators, log }: McpRouteDeps) {
+export function mcpRouter({ store, samples, sounds, prep, authenticators, log }: McpRouteDeps) {
   const router = Router();
   const auth = requireMcpAuth(authenticators);
 
@@ -35,7 +37,7 @@ export function mcpRouter({ store, samples, sounds, authenticators, log }: McpRo
     asyncHandler(async (req, res) => {
       const principal = req.principal;
       if (!principal) throw new Error("requireMcpAuth did not run");
-      const server = buildMcpServer({ uid: principal.uid, store, samples, sounds });
+      const server = buildMcpServer({ uid: principal.uid, store, samples, sounds, prep });
       const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
       res.on("close", () => {
         void transport.close();
