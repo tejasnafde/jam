@@ -7,3 +7,4 @@ sa-*.json
 .DS_Store
 coverage
 .wrangler
+__pycache__/

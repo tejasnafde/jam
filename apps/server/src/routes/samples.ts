@@ -1,6 +1,7 @@
 import {
   CreateUploadUrl,
   RegisterSample,
+  SAMPLE_ID,
   SAMPLE_MAX_BYTES,
   samplePath,
   type Sample,
@@ -16,8 +17,7 @@ import type { SampleBlobs } from "../store/blobs.js";
 import { SampleNameTaken, type SampleStore } from "../store/samples.js";
 import { asyncHandler, parseBody } from "./validate.js";
 
-// Ours are 20 hex chars; the prep job may use Firestore ids. Never a path separator.
-const SAMPLE_ID = /^[A-Za-z0-9_-]{1,64}$/;
+// Ours are 20 hex chars; the prep job may use Firestore ids. SAMPLE_ID never allows a path separator.
 const RegisterBody = RegisterSample.extend({ id: RegisterSample.shape.id.regex(SAMPLE_ID) });
 
 const nameTaken = (name: string) => ({ error: "name_taken", message: `You already have a sample named ${name}.` });

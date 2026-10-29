@@ -5,13 +5,16 @@ import { errorFields, silentLogger, type Logger } from "./logger.js";
 import { audioRouter } from "./routes/audio.js";
 import { mcpRouter } from "./routes/mcp.js";
 import { planRouter } from "./routes/plan.js";
+import { prepRouter } from "./routes/prep.js";
 import { samplesRouter } from "./routes/samples.js";
 import { staticRouter } from "./routes/static.js";
 import { tokensRouter } from "./routes/tokens.js";
 import { versionsRouter } from "./routes/versions.js";
+import type { PrepRunner } from "./prep/runner.js";
 import type { SoundIndex } from "./sounds/soundIndex.js";
 import type { SampleBlobs } from "./store/blobs.js";
 import type { SampleStore } from "./store/samples.js";
+import type { PrepStore } from "./store/prep.js";
 import type { Store } from "./store/types.js";
 
 export interface AppDeps {
@@ -20,6 +23,7 @@ export interface AppDeps {
   blobs: SampleBlobs;
   sounds: SoundIndex;
   verifyIdToken: IdTokenVerifier;
+  prep: { store: PrepStore; run: PrepRunner };
   /** Extra MCP authenticators (phase 2: OAuth). Personal tokens are always on. */
   extraAuthenticators?: McpAuthenticator[];
   staticDir?: string;
@@ -32,6 +36,7 @@ export function createApp({
   blobs,
   sounds,
   verifyIdToken,
+  prep,
   extraAuthenticators = [],
   staticDir,
   log = silentLogger,
@@ -53,10 +58,11 @@ export function createApp({
   api.use("/plan", planRouter(store));
   api.use("/tokens", tokensRouter(store, log));
   api.use("/samples", samplesRouter(samples, blobs, log));
+  api.use("/prep", prepRouter(samples, prep.store, prep.run, log));
   app.use("/api", api);
 
   const authenticators = [personalTokenAuthenticator(store, log), ...extraAuthenticators];
-  app.use("/mcp", mcpRouter({ store, samples, sounds, authenticators, log }));
+  app.use("/mcp", mcpRouter({ store, samples, sounds, prep: prep.store, authenticators, log }));
 
   if (staticDir) app.use(staticRouter(staticDir));
 

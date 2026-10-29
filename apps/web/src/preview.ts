@@ -37,6 +37,13 @@ export const PREVIEW_PANEL: PanelOverride = {
   uploadingSample: false,
   onUploadSample: () => {},
   onDeleteSample: () => {},
+  prep: {
+    jobs: {
+      s2: { status: "done", jobId: "j1", sampleIds: ["s3", "s4", "s5", "s6"] },
+      s3: { status: "running", jobId: "j2" },
+    },
+    start: async () => {},
+  },
 };
 
 function sample(

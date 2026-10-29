@@ -2,6 +2,8 @@ import type { SampleWithUrl } from "@jam/shared";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import type { PrepHandle } from "@/features/prep/usePrep";
 import { LibrarySection } from "./LibrarySection";
 import { contentTypeOf, sampleFacts, toSampleName } from "./sampleFile";
 
@@ -62,5 +64,32 @@ describe("LibrarySection", () => {
     const file = new File(["x"], "song.mp3", { type: "audio/mpeg" });
     await userEvent.upload(screen.getByLabelText("Audio file"), file);
     expect(onUpload).toHaveBeenCalledWith(file);
+  });
+
+  it("has a Prep menu on each row when prep is on", async () => {
+    const prep: PrepHandle = { jobs: {}, start: vi.fn(async () => {}) };
+    render(
+      <LibrarySection signedIn samples={[take]} uploading={false} onUpload={vi.fn()} onDelete={vi.fn()} prep={prep} />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Prep mytake" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Split stems" }));
+    expect(prep.start).toHaveBeenCalledWith("s1", { split: true });
+  });
+
+  it("shows the prep status and keeps the source while a job runs", () => {
+    const prep: PrepHandle = { jobs: { s1: { status: "running", jobId: "j1" } }, start: vi.fn() };
+    render(
+      <TooltipProvider>
+        <LibrarySection signedIn samples={[take]} uploading={false} onUpload={vi.fn()} onDelete={vi.fn()} prep={prep} />
+      </TooltipProvider>,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("Preparing");
+    expect(screen.getByRole("button", { name: "Delete mytake" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Prep mytake" })).toBeDisabled();
+  });
+
+  it("hides the Prep menu without a prep handle", () => {
+    render(<LibrarySection signedIn samples={[take]} uploading={false} onUpload={vi.fn()} onDelete={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "Prep mytake" })).toBeNull();
   });
 });

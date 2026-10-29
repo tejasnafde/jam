@@ -6,6 +6,7 @@ import type { Profile } from "@/features/auth/authContext";
 import { ConnectSection } from "@/features/connect/ConnectSection";
 import { LibrarySection } from "@/features/library/LibrarySection";
 import { PlanSection } from "@/features/plan/PlanSection";
+import type { PrepHandle } from "@/features/prep/usePrep";
 import { PanelCard } from "./PanelCard";
 
 export interface SidePanelProps {
@@ -22,6 +23,7 @@ export interface SidePanelProps {
   uploadingSample: boolean;
   onUploadSample: (file: File) => void;
   onDeleteSample: (id: string) => void;
+  prep?: PrepHandle;
 }
 
 export function SidePanel(props: SidePanelProps) {
@@ -47,6 +49,7 @@ export function SidePanel(props: SidePanelProps) {
               uploading={props.uploadingSample}
               onUpload={props.onUploadSample}
               onDelete={props.onDeleteSample}
+              prep={props.prep}
             />
           </PanelCard>
           <PanelCard title="Connect an assistant" coach open={connectOpen} onOpenChange={setConnectOpen}>

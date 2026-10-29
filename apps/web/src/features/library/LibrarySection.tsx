@@ -3,6 +3,8 @@ import { Check, Copy, Loader2, Play, Square, Trash2, Upload } from "lucide-react
 import { useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { PrepMenu, PrepStatusBadge } from "@/features/prep/PrepMenu";
+import { isPrepActive, type PrepHandle } from "@/features/prep/usePrep";
 import { sampleFacts } from "./sampleFile";
 
 interface Props {
@@ -11,6 +13,8 @@ interface Props {
   uploading: boolean;
   onUpload: (file: File) => void;
   onDelete: (id: string) => void;
+  /** Prep jobs (split, tempo, key). Leave out to hide the Prep menu. */
+  prep?: PrepHandle;
 }
 
 function SampleRow({
@@ -18,12 +22,17 @@ function SampleRow({
   playing,
   onTogglePlay,
   onDelete,
+  prep,
 }: {
   sample: SampleWithUrl;
   playing: boolean;
   onTogglePlay: () => void;
   onDelete: () => void;
+  prep?: PrepHandle;
 }) {
+  const prepState = prep?.jobs[sample.id];
+  // The worker reads the source while it runs, so the source stays until the job ends.
+  const preparing = !!prepState && isPrepActive(prepState);
   const [copied, setCopied] = useState(false);
   const usage = `s("${sample.name}")`;
   const copy = async () => {
@@ -51,18 +60,26 @@ function SampleRow({
           </Badge>
           <span className="truncate text-xs text-muted-foreground">{sampleFacts(sample)}</span>
         </div>
+        {prepState && <PrepStatusBadge state={prepState} />}
       </div>
+      {prep && <PrepMenu sample={sample} prep={prep} />}
       <Button variant="ghost" size="icon-sm" onClick={copy} aria-label={copied ? "Copied" : `Copy ${usage}`}>
         {copied ? <Check className="text-water" /> : <Copy />}
       </Button>
-      <Button variant="ghost" size="icon-sm" onClick={onDelete} aria-label={`Delete ${sample.name}`}>
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        onClick={onDelete}
+        disabled={preparing}
+        aria-label={`Delete ${sample.name}`}
+      >
         <Trash2 />
       </Button>
     </li>
   );
 }
 
-export function LibrarySection({ signedIn, samples, uploading, onUpload, onDelete }: Props) {
+export function LibrarySection({ signedIn, samples, uploading, onUpload, onDelete, prep }: Props) {
   const input = useRef<HTMLInputElement>(null);
   const audio = useRef<HTMLAudioElement | null>(null);
   const [playingId, setPlayingId] = useState<string | null>(null);
@@ -111,6 +128,7 @@ export function LibrarySection({ signedIn, samples, uploading, onUpload, onDelet
               playing={playingId === s.id}
               onTogglePlay={() => togglePlay(s)}
               onDelete={() => remove(s)}
+              prep={prep}
             />
           ))}
         </ul>

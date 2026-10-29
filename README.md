@@ -39,6 +39,7 @@ in the URL.
 | `get_sample`         | read       | One sample by name, with its stems and prepared versions                            |
 | `set_session_plan`   | plan write | Start a new plan (destination plus 4 to 6 stages)                                   |
 | `set_stage`          | plan write | Move to a stage, with an optional short note                                        |
+| `get_prep_status`    | read       | The user's prep jobs (stem split, tempo match, key shift) and the samples they made |
 
 Prompt: `start_session` (optional `mood`, `minutes`). The coaching rules are also in the server instructions, so a
 client that does not use prompts still gets them.
@@ -61,6 +62,10 @@ apps/
     src/lib/             Firebase client, typed API client, audio analyser tap
 packages/
   shared/          zod schemas and types used by both apps
+services/
+  prep/            Python Cloud Run job: Demucs stem split, BPM and key detection, Rubber Band
+                   tempo and pitch. One execution per prep job; the server starts it, it writes
+                   its status to Firestore users/{uid}/prep_jobs/{id}
 edge/              Cloudflare Worker that maps jam.tn07.dev to Cloud Run
 ```
 
@@ -102,7 +107,8 @@ npm run build
 ## Deploy
 
 A push to `main` runs the checks, then deploys to Cloud Run (`.github/workflows/ci.yml`). There is no other deploy
-path. The edge Worker is deployed by hand with `cd edge && npx wrangler deploy`; it only changes if the Cloud Run URL
+path. When `services/prep` changes, CI also builds the prep image with Cloud Build and updates the `jam-prep` Cloud
+Run job (it never runs it). The edge Worker is deployed by hand with `cd edge && npx wrangler deploy`; it only changes if the Cloud Run URL
 does.
 
 ## License
