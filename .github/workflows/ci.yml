@@ -71,7 +71,7 @@ jobs:
 
       - name: Verify it serves
         run: |
-          for url in "https://jam-974343814740.${REGION}.run.app/healthz" "https://jam.tn07.dev/healthz"; do
+          for url in "https://jam-974343814740.${REGION}.run.app/health" "https://jam.tn07.dev/health"; do
             CODE=$(curl -s -o /dev/null -w "%{http_code}" -m 60 "$url")
             echo "$url -> HTTP ${CODE}"
             [ "$CODE" = "200" ] || exit 1

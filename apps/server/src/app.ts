@@ -33,7 +33,8 @@ export function createApp({
   app.disable("x-powered-by");
   app.set("trust proxy", true);
 
-  app.get("/healthz", (_req, res) => {
+  // Not /healthz: Google's front end reserves that path on Cloud Run and answers 404 itself.
+  app.get("/health", (_req, res) => {
     res.json({ ok: true });
   });
 
