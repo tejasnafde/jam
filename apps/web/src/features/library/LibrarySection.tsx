@@ -32,7 +32,7 @@ function SampleRow({
     setTimeout(() => setCopied(false), 1500);
   };
   return (
-    <li className="flex items-center gap-2 rounded-lg bg-background py-2 pr-2 pl-2">
+    <li className="flex items-center gap-1.5 rounded-lg bg-background py-2 pr-1 pl-1">
       <Button
         variant="ghost"
         size="icon-sm"
@@ -41,14 +41,16 @@ function SampleRow({
       >
         {playing ? <Square className="text-oil" /> : <Play />}
       </Button>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <p className="truncate font-mono text-sm">{sample.name}</p>
-          <Badge variant="outline" className="text-muted-foreground">
+      <div className="w-0 flex-1">
+        <p className="truncate font-mono text-sm" title={sample.name}>
+          {sample.name}
+        </p>
+        <div className="flex items-center gap-1.5">
+          <Badge variant="outline" className="h-4 shrink-0 px-1.5 text-[11px] text-muted-foreground">
             {sample.kind}
           </Badge>
+          <span className="truncate text-xs text-muted-foreground">{sampleFacts(sample)}</span>
         </div>
-        <p className="text-xs text-muted-foreground">{sampleFacts(sample)}</p>
       </div>
       <Button variant="ghost" size="icon-sm" onClick={copy} aria-label={copied ? "Copied" : `Copy ${usage}`}>
         {copied ? <Check className="text-water" /> : <Copy />}
@@ -125,12 +127,12 @@ export function LibrarySection({ signedIn, samples, uploading, onUpload, onDelet
           if (file) onUpload(file);
         }}
       />
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <Button variant="secondary" size="lg" disabled={uploading} onClick={() => input.current?.click()}>
           {uploading ? <Loader2 className="animate-spin" /> : <Upload />}
           {uploading ? "Uploading" : "Upload audio"}
         </Button>
-        <span className="text-xs text-muted-foreground">mp3 or wav, up to 50 MB</span>
+        <span className="text-xs text-muted-foreground">mp3 or wav, max 50 MB</span>
       </div>
     </div>
   );
