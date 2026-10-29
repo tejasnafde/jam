@@ -35,6 +35,8 @@ in the URL.
 | `get_audio_snapshot` | read       | Loudness and low/mid/high energy measured after each evaluation                     |
 | `lookup_sound`       | read       | Search Strudel's default sounds: synths, `gm_*` soundfonts, sample banks, drum kits |
 | `get_session_plan`   | read       | The current plan and stage                                                          |
+| `list_samples`       | read       | The user's sample library: kind, duration, BPM, key, stats, stems and ops           |
+| `get_sample`         | read       | One sample by name, with its stems and prepared versions                            |
 | `set_session_plan`   | plan write | Start a new plan (destination plus 4 to 6 stages)                                   |
 | `set_stage`          | plan write | Move to a stage, with an optional short note                                        |
 | `get_prep_status`    | read       | The user's prep jobs (stem split, tempo match, key shift) and the samples they made |
@@ -56,7 +58,7 @@ apps/
   web/             React + Vite + Tailwind + shadcn/ui
     src/components/ui/   shadcn components
     src/components/      App shell: top bar, side panel, level meter
-    src/features/        auth, editor (wraps <strudel-editor>), plan, connect
+    src/features/        auth, editor (wraps <strudel-editor>), plan, connect, library
     src/lib/             Firebase client, typed API client, audio analyser tap
 packages/
   shared/          zod schemas and types used by both apps
@@ -67,7 +69,9 @@ services/
 edge/              Cloudflare Worker that maps jam.tn07.dev to Cloud Run
 ```
 
-Storage is Firestore (named database `jam-db` in `teejayproject`). No state lives in server memory, so Cloud Run can
+Storage is Firestore (named database `jam-db` in `teejayproject`). Sample audio lives in the private bucket
+`jam-samples-teejayproject` under `users/{uid}/`; the page uploads and plays it through short-lived signed URLs, and
+registers each sample with Strudel so `s("name")` plays it. No state lives in server memory, so Cloud Run can
 run several instances.
 
 MCP auth is a list of authenticators. Phase 1 has the personal token. Phase 2 adds OAuth 2.1 with dynamic client
@@ -86,6 +90,9 @@ npm run dev          # web app on :5173, proxies /api and /mcp to :8080
 The server uses Application Default Credentials for Firestore. Point `GOOGLE_APPLICATION_CREDENTIALS` at a service
 account key that can use the `jam-db` database. `http://localhost:5173/?preview` shows the side panel with fixture data
 and needs no backend.
+
+Sample uploads and playback go straight to the bucket, and its CORS allows only `localhost:5173` (dev) and
+`localhost:4173` (preview). GCS CORS has no port wildcard, so on another port add the origin to the bucket CORS.
 
 Checks, the same as CI:
 

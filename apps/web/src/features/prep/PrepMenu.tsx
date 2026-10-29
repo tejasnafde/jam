@@ -1,6 +1,6 @@
 import type { PrepOps, Sample } from "@jam/shared";
 import { AlertCircle, Check, Gauge, LoaderCircle, Music2, Split, Wand2 } from "lucide-react";
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -74,9 +74,8 @@ export function PrepMenu({ sample, prep }: { sample: PrepSample; prep: PrepHandl
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="sm" disabled={busy} aria-label={`Prep ${sample.name}`}>
+          <Button variant="ghost" size="icon-sm" disabled={busy} aria-label={`Prep ${sample.name}`} title="Prep">
             <Wand2 aria-hidden="true" />
-            Prep
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-52">
@@ -95,7 +94,8 @@ export function PrepMenu({ sample, prep }: { sample: PrepSample; prep: PrepHandl
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      <TempoDialog sample={sample} open={asking === "tempo"} onClose={() => setAsking(null)} onRun={run} />
+      {/* Mounted per open, so it starts from the sample's latest detected BPM. */}
+      {asking === "tempo" && <TempoDialog sample={sample} open onClose={() => setAsking(null)} onRun={run} />}
       <KeyDialog sample={sample} open={asking === "key"} onClose={() => setAsking(null)} onRun={run} />
     </>
   );
@@ -108,27 +108,90 @@ interface AskProps {
   onRun: (ops: PrepOps) => void;
 }
 
+const SOURCE_MIN = 30;
+const SOURCE_MAX = 300;
+const inRange = (n: number, min: number, max: number) => Number.isFinite(n) && n >= min && n <= max;
+const tidy = (n: number) => String(Math.round(n * 10) / 10);
+
 function TempoDialog({ sample, open, onClose, onRun }: AskProps) {
   const [tempo, setTempo] = useState(String(Math.round(sample.bpm ?? 120)));
+  // The detector folds into 70-180 BPM, so a 60 BPM ballad reads as 120. The user can halve or double it.
+  const [source, setSource] = useState(sample.bpm ? tidy(sample.bpm) : "");
+  const target = useRef<HTMLInputElement>(null);
   const value = Number(tempo);
-  const valid = Number.isFinite(value) && value >= 40 && value <= 220;
+  const from = Number(source);
+  const validTempo = inRange(value, 40, 220);
+  const validSource = source === "" || inRange(from, SOURCE_MIN, SOURCE_MAX);
+  const valid = validTempo && validSource;
+  const scale = (by: number) => setSource(tidy(from * by));
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (valid) onRun({ tempo: value });
+    if (valid) onRun(source === "" ? { tempo: value } : { tempo: value, sourceBpm: from });
   };
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="sm:max-w-sm">
+      <DialogContent
+        className="sm:max-w-sm"
+        onOpenAutoFocus={(e) => {
+          e.preventDefault();
+          target.current?.select();
+        }}
+      >
         <form onSubmit={submit} className="flex flex-col gap-4">
           <DialogHeader>
             <DialogTitle>Match tempo</DialogTitle>
-            <DialogDescription>
-              {sample.bpm ? `${sample.name} is about ${Math.round(sample.bpm)} BPM. ` : ""}
-              The pitch stays the same. {NEW_SAMPLES}
-            </DialogDescription>
+            <DialogDescription>The pitch stays the same. {NEW_SAMPLES}</DialogDescription>
           </DialogHeader>
+          <div className="flex flex-col gap-1.5">
+            <label className="flex items-center gap-3 text-sm">
+              <span className="w-12">From</span>
+              <Input
+                type="number"
+                inputMode="decimal"
+                min={SOURCE_MIN}
+                max={SOURCE_MAX}
+                step="any"
+                value={source}
+                placeholder="auto"
+                onChange={(e) => setSource(e.target.value)}
+                className="w-24 font-mono"
+                aria-label="Source tempo"
+                aria-invalid={!validSource}
+              />
+              BPM
+              <span className="ml-auto flex gap-1">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="font-mono"
+                  disabled={source === "" || !inRange(from / 2, SOURCE_MIN, SOURCE_MAX)}
+                  onClick={() => scale(0.5)}
+                  aria-label="Halve the source tempo"
+                >
+                  /2
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="font-mono"
+                  disabled={source === "" || !inRange(from * 2, SOURCE_MIN, SOURCE_MAX)}
+                  onClick={() => scale(2)}
+                  aria-label="Double the source tempo"
+                >
+                  x2
+                </Button>
+              </span>
+            </label>
+            <p className="text-xs text-muted-foreground">
+              {sample.bpm
+                ? `Detected ${tidy(sample.bpm)} BPM. Detection can be half or double the real tempo.`
+                : "Not detected yet. Enter it, or leave it empty to detect it."}
+            </p>
+          </div>
           <label className="flex items-center gap-3 text-sm">
-            Target
+            <span className="w-12">To</span>
             <Input
               type="number"
               inputMode="numeric"
@@ -138,8 +201,9 @@ function TempoDialog({ sample, open, onClose, onRun }: AskProps) {
               value={tempo}
               onChange={(e) => setTempo(e.target.value)}
               className="w-24 font-mono"
-              aria-invalid={!valid}
-              autoFocus
+              ref={target}
+              aria-label="Target tempo"
+              aria-invalid={!validTempo}
             />
             BPM
           </label>

@@ -1,15 +1,24 @@
-import { prepRequestSchema, type PrepJob, type PrepStatusResponse } from "@jam/shared";
+import { PREP_WORKER_STOPPED, SAMPLE_ID, prepRequestSchema, type PrepJob, type PrepStatusResponse } from "@jam/shared";
 import { Router } from "express";
 import { pageUser } from "../auth/userAuth.js";
 import { errorFields, type Logger } from "../logger.js";
 import type { PrepRunner } from "../prep/runner.js";
-import type { PrepStore } from "../store/prep.js";
+import { withStaleness, type PrepLimits, type PrepRefusal, type PrepStore } from "../store/prep.js";
+import type { SampleStore } from "../store/samples.js";
 import { asyncHandler, parseBody } from "./validate.js";
 
 /** Each run takes 4 CPU and 8 GiB, so a user may have only a few in flight. */
 export const MAX_ACTIVE_PREP_JOBS = 2;
-/** A job that has not finished by then has died (the task timeout is 30 min). */
-const STALE_MS = 35 * 60_000;
+/** All users together. Sign-in is open to any Google account. */
+export const MAX_GLOBAL_PREP_JOBS = 6;
+/** Jobs one user may start in a rolling 24 h. */
+export const MAX_DAILY_PREP_JOBS = 20;
+
+const REFUSALS: Record<PrepRefusal, { error: string; message: string }> = {
+  user_busy: { error: "too_many_jobs", message: "Wait for a prep job to finish first." },
+  global_busy: { error: "prep_busy", message: "The prep worker is busy. Try again in a few minutes." },
+  daily_quota: { error: "daily_quota", message: "You reached the prep limit for today. Try again tomorrow." },
+};
 
 export const toPrepStatus = ({ status, sampleIds, error }: PrepJob): PrepStatusResponse => ({
   status,
@@ -17,10 +26,13 @@ export const toPrepStatus = ({ status, sampleIds, error }: PrepJob): PrepStatusR
   ...(error ? { error } : {}),
 });
 
-const isActive = (job: PrepJob, nowMs: number) =>
-  (job.status === "queued" || job.status === "running") && nowMs - Date.parse(job.createdAt) < STALE_MS;
-
-export function prepRouter(store: PrepStore, run: PrepRunner, log: Logger, nowMs = () => Date.now()) {
+export function prepRouter(
+  samples: SampleStore,
+  store: PrepStore,
+  run: PrepRunner,
+  log: Logger,
+  nowMs = () => Date.now(),
+) {
   const router = Router();
 
   router.post(
@@ -29,16 +41,24 @@ export function prepRouter(store: PrepStore, run: PrepRunner, log: Logger, nowMs
       const body = parseBody(prepRequestSchema, req, res);
       if (!body) return;
       const { uid } = pageUser(req);
-      if (!(await store.sampleExists(uid, body.sampleId))) {
+      // SampleStore.get parses the doc, so a broken sample cannot be prepped.
+      if (!(await samples.get(uid, body.sampleId))) {
         res.status(404).json({ error: "sample_not_found" });
         return;
       }
-      const recent = await store.listJobs(uid, 10);
-      if (recent.filter((j) => isActive(j, nowMs())).length >= MAX_ACTIVE_PREP_JOBS) {
-        res.status(429).json({ error: "too_many_jobs", message: "Wait for a prep job to finish first." });
+      const limits: PrepLimits = {
+        perUser: MAX_ACTIVE_PREP_JOBS,
+        global: MAX_GLOBAL_PREP_JOBS,
+        perDay: MAX_DAILY_PREP_JOBS,
+        nowMs: nowMs(),
+      };
+      const created = await store.createJob(uid, body.sampleId, body.ops, limits);
+      if (!created.ok) {
+        log.warn("prep refused", { uid, reason: created.reason });
+        res.status(429).json(REFUSALS[created.reason]);
         return;
       }
-      const job = await store.createJob(uid, body.sampleId, body.ops);
+      const { job } = created;
       try {
         await run({ uid, jobId: job.id, sampleId: body.sampleId, ops: body.ops });
       } catch (err) {
@@ -55,12 +75,19 @@ export function prepRouter(store: PrepStore, run: PrepRunner, log: Logger, nowMs
   router.get(
     "/:jobId",
     asyncHandler(async (req, res) => {
-      const job = await store.getJob(pageUser(req).uid, String(req.params.jobId));
+      const { uid } = pageUser(req);
+      const jobId = String(req.params.jobId);
+      const job = SAMPLE_ID.test(jobId) ? await store.getJob(uid, jobId) : null;
       if (!job) {
         res.status(404).json({ error: "not_found" });
         return;
       }
-      res.json(toPrepStatus(job));
+      const seen = withStaleness(job, nowMs());
+      if (seen !== job) {
+        log.warn("prep worker stopped", { uid, jobId, updatedAt: job.updatedAt });
+        await store.updateJob(uid, jobId, { status: "failed", error: PREP_WORKER_STOPPED });
+      }
+      res.json(toPrepStatus(seen));
     }),
   );
 

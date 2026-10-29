@@ -113,23 +113,27 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Did services/prep change?
-        id: changed
-        run: |
-          BEFORE="${{ github.event.before }}"
-          if [ "${{ github.event_name }}" != "push" ] || ! git cat-file -e "${BEFORE}^{commit}" 2>/dev/null \
-            || ! git diff --quiet "$BEFORE" "$GITHUB_SHA" -- services/prep; then
-            echo "build=true" >> "$GITHUB_OUTPUT"
-          fi
-
       - uses: google-github-actions/auth@v2
-        if: steps.changed.outputs.build == 'true'
         with:
           workload_identity_provider: projects/974343814740/locations/global/workloadIdentityPools/github-actions/providers/github
           service_account: 974343814740-compute@developer.gserviceaccount.com
 
       - uses: google-github-actions/setup-gcloud@v2
-        if: steps.changed.outputs.build == 'true'
+
+      # The image tag is the last commit that touched services/prep. Build when the job
+      # runs any other tag, so a failed build or deploy is retried on the next push to main.
+      # A manual run (workflow_dispatch) always builds.
+      - name: Is the job on the newest services/prep?
+        id: changed
+        run: |
+          WANT=$(git log -1 --format=%H -- services/prep)
+          HAVE=$(gcloud run jobs describe "$PREP_JOB" --project="$PROJECT" --region="$REGION" \
+            --format='value(spec.template.spec.template.spec.containers[0].image)' 2>/dev/null || true)
+          echo "want ${PREP_IMAGE}:${WANT}, job has ${HAVE:-nothing}"
+          echo "tag=${WANT}" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "$HAVE" != "${PREP_IMAGE}:${WANT}" ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Build the image (Cloud Build)
         if: steps.changed.outputs.build == 'true'
@@ -137,13 +141,13 @@ jobs:
           gcloud builds submit services/prep \
             --project="$PROJECT" \
             --config=services/prep/cloudbuild.yaml \
-            --substitutions="_TAG=${GITHUB_SHA}"
+            --substitutions="_TAG=${{ steps.changed.outputs.tag }}"
 
       - name: Update the job
         if: steps.changed.outputs.build == 'true'
         run: |
           gcloud run jobs deploy "$PREP_JOB" \
-            --image="${PREP_IMAGE}:${GITHUB_SHA}" \
+            --image="${PREP_IMAGE}:${{ steps.changed.outputs.tag }}" \
             --project="$PROJECT" \
             --region="$REGION" \
             --service-account="$PREP_SA" \

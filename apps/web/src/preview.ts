@@ -1,4 +1,5 @@
 // Fixture data for the dev-only ?preview mode (layout screenshots). Never bundled in production.
+import type { SampleWithUrl } from "@jam/shared";
 import type { PanelOverride } from "./App";
 
 export const PREVIEW_PANEL: PanelOverride = {
@@ -28,4 +29,42 @@ export const PREVIEW_PANEL: PanelOverride = {
   onSignOut: () => {},
   onCreateToken: () => {},
   onRevokeToken: () => {},
+  samples: [
+    sample("s1", "rainy_hook", "take", 4.2, { key: "F minor", ops: ["autotune:hard", "reverb"] }),
+    sample("s2", "nightdrive", "upload", 212.6, { bpm: 92, key: "A minor" }),
+    sample("s3", "nightdrive_vocals", "stem", 212.6, { bpm: 92, key: "A minor", stem: "vocals", parentId: "s2" }),
+  ],
+  uploadingSample: false,
+  onUploadSample: () => {},
+  onDeleteSample: () => {},
+  prep: {
+    jobs: {
+      s2: { status: "done", jobId: "j1", sampleIds: ["s3", "s4", "s5", "s6"] },
+      s3: { status: "running", jobId: "j2" },
+    },
+    start: async () => {},
+  },
 };
+
+function sample(
+  id: string,
+  name: string,
+  kind: SampleWithUrl["kind"],
+  durationSec: number,
+  extra: Partial<SampleWithUrl> = {},
+): SampleWithUrl {
+  const storagePath = `users/u/samples/${id}.wav`;
+  return {
+    id,
+    userId: "u",
+    name,
+    kind,
+    storagePath,
+    contentType: "audio/wav",
+    durationSec,
+    ops: [],
+    createdAt: "",
+    url: "",
+    ...extra,
+  };
+}

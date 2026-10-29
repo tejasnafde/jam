@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { SoundIndex } from "../sounds/soundIndex.js";
+import type { SampleStore } from "../store/samples.js";
 import type { PrepStore } from "../store/prep.js";
 import type { Store } from "../store/types.js";
 
@@ -7,6 +8,7 @@ import type { Store } from "../store/types.js";
 export interface ToolContext {
   uid: string;
   store: Store;
+  samples: SampleStore;
   sounds: SoundIndex;
   prep: PrepStore;
 }

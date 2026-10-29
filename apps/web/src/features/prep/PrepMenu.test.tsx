@@ -26,7 +26,7 @@ describe("PrepMenu", () => {
     render(<PrepMenu sample={sample} prep={prep} />);
     await userEvent.click(screen.getByRole("button", { name: "Prep song" }));
     await userEvent.click(screen.getByRole("menuitem", { name: "Match tempo..." }));
-    const input = screen.getByRole("spinbutton");
+    const input = screen.getByRole("spinbutton", { name: "Target tempo" });
     expect(input).toHaveValue(98);
     await userEvent.clear(input);
     await userEvent.type(input, "300");
@@ -34,7 +34,41 @@ describe("PrepMenu", () => {
     await userEvent.clear(input);
     await userEvent.type(input, "120");
     await userEvent.click(screen.getByRole("button", { name: "Match tempo" }));
-    expect(prep.start).toHaveBeenCalledWith("s1", { tempo: 120 });
+    expect(prep.start).toHaveBeenCalledWith("s1", { tempo: 120, sourceBpm: 98 });
+  });
+
+  it("shows the detected BPM and lets the user halve or double it", async () => {
+    const prep = handle();
+    render(<PrepMenu sample={{ ...sample, bpm: 120 }} prep={prep} />);
+    await userEvent.click(screen.getByRole("button", { name: "Prep song" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Match tempo..." }));
+    expect(screen.getByText(/Detected 120 BPM/)).toBeInTheDocument();
+    const source = screen.getByRole("spinbutton", { name: "Source tempo" });
+    expect(source).toHaveValue(120);
+    await userEvent.click(screen.getByRole("button", { name: "Halve the source tempo" }));
+    expect(source).toHaveValue(60);
+    await userEvent.click(screen.getByRole("button", { name: "Double the source tempo" }));
+    await userEvent.click(screen.getByRole("button", { name: "Halve the source tempo" }));
+    const target = screen.getByRole("spinbutton", { name: "Target tempo" });
+    await userEvent.clear(target);
+    await userEvent.type(target, "90");
+    await userEvent.click(screen.getByRole("button", { name: "Match tempo" }));
+    expect(prep.start).toHaveBeenCalledWith("s1", { tempo: 90, sourceBpm: 60 });
+  });
+
+  it("leaves the source tempo to the worker when none is detected", async () => {
+    const prep = handle();
+    render(<PrepMenu sample={{ id: "s2", name: "raw" }} prep={prep} />);
+    await userEvent.click(screen.getByRole("button", { name: "Prep raw" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Match tempo..." }));
+    expect(screen.getByText(/Not detected yet/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Halve the source tempo" })).toBeDisabled();
+    const source = screen.getByRole("spinbutton", { name: "Source tempo" });
+    await userEvent.type(source, "10");
+    expect(screen.getByRole("button", { name: "Match tempo" })).toBeDisabled();
+    await userEvent.clear(source);
+    await userEvent.click(screen.getByRole("button", { name: "Match tempo" }));
+    expect(prep.start).toHaveBeenCalledWith("s2", { tempo: 120 });
   });
 
   it("is disabled while a job runs", () => {
