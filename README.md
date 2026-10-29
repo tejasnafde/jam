@@ -86,6 +86,9 @@ The server uses Application Default Credentials for Firestore. Point `GOOGLE_APP
 account key that can use the `jam-db` database. `http://localhost:5173/?preview` shows the side panel with fixture data
 and needs no backend.
 
+Sample uploads and playback go straight to the bucket, and its CORS allows only `localhost:5173` (dev) and
+`localhost:4173` (preview). GCS CORS has no port wildcard, so on another port add the origin to the bucket CORS.
+
 Checks, the same as CI:
 
 ```sh

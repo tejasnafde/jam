@@ -4,6 +4,9 @@ import { CreateUploadUrl, Sample } from "./samples.js";
 
 export const SAMPLE_MAX_BYTES = 50 * 1024 * 1024;
 
+/** Signed into every upload URL and sent with the PUT, so GCS itself rejects a larger body. */
+export const UPLOAD_SIZE_HEADERS = { "x-goog-content-length-range": `0,${SAMPLE_MAX_BYTES}` } as const;
+
 export const SAMPLE_EXT = {
   "audio/wav": "wav",
   "audio/mpeg": "mp3",

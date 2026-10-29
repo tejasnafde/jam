@@ -9,6 +9,7 @@ import {
 } from "@jam/shared";
 import { Router } from "express";
 import { randomBytes } from "node:crypto";
+import type { z } from "zod";
 import { pageUser } from "../auth/userAuth.js";
 import type { Logger } from "../logger.js";
 import type { SampleBlobs } from "../store/blobs.js";
@@ -20,6 +21,17 @@ const SAMPLE_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const RegisterBody = RegisterSample.extend({ id: RegisterSample.shape.id.regex(SAMPLE_ID) });
 
 const nameTaken = (name: string) => ({ error: "name_taken", message: `You already have a sample named ${name}.` });
+
+/**
+ * The page may only register its own takes and uploads. Derived fields (stem, stats, ops) are kept only
+ * when parentId names one of the user's samples; anything else is the prep job's to write.
+ */
+async function trusted(samples: SampleStore, uid: string, body: z.output<typeof RegisterBody>) {
+  if (body.parentId && (await samples.get(uid, body.parentId))) return body;
+  const { id, name, storagePath, contentType, durationSec, bpm, key } = body;
+  const kind = body.kind === "take" ? ("take" as const) : ("upload" as const);
+  return { id, name, kind, storagePath, contentType, durationSec, bpm, key, ops: [] };
+}
 
 /** The user's sample library. Every object lives under users/{uid}/, and every call checks the owner. */
 export function samplesRouter(samples: SampleStore, blobs: SampleBlobs, log: Logger) {
@@ -66,11 +78,22 @@ export function samplesRouter(samples: SampleStore, blobs: SampleBlobs, log: Log
         res.status(413).json({ error: "too_large", message: "A sample can be 50 MB at most." });
         return;
       }
-      const sample: Sample = { ...body, userId: uid, createdAt: new Date().toISOString() };
+      if (await samples.get(uid, body.id)) {
+        res.status(409).json({ error: "id_taken", message: "This sample is already registered." });
+        return;
+      }
+      const sample: Sample = {
+        ...(await trusted(samples, uid, body)),
+        userId: uid,
+        createdAt: new Date().toISOString(),
+      };
       try {
         await samples.create(sample);
       } catch (err) {
         if (!(err instanceof SampleNameTaken)) throw err;
+        // ponytail: an upload that is never registered (tab closed after the PUT) still stays in the bucket;
+        // add a sweep of objects with no doc if storage cost shows up.
+        await blobs.remove(body.storagePath);
         res.status(409).json(nameTaken(body.name));
         return;
       }
@@ -100,8 +123,9 @@ export function samplesRouter(samples: SampleStore, blobs: SampleBlobs, log: Log
         res.status(404).end();
         return;
       }
-      await blobs.remove(sample.storagePath);
+      // Doc first: a leftover blob is invisible, a leftover doc is a broken row.
       await samples.delete(uid, sample.id);
+      await blobs.remove(sample.storagePath);
       log.info("sample deleted", { uid, id: sample.id });
       res.status(204).end();
     }),

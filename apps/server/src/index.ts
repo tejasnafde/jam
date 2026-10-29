@@ -26,7 +26,7 @@ const staticDir = config.STATIC_DIR ?? path.resolve(here, "../../web/dist");
 
 const app = createApp({
   store: new FirestoreStore(db),
-  samples: new FirestoreSampleStore(db),
+  samples: new FirestoreSampleStore(db, log),
   blobs: new GcsBlobs(getStorage(firebase).bucket(SAMPLE_BUCKET)),
   sounds: new SoundIndex(),
   verifyIdToken: async (idToken) => {

@@ -43,6 +43,8 @@ export class MemorySampleStore implements SampleStore {
   }
 
   async create(sample: Sample) {
+    // Firestore's tx.create fails on an existing doc, so the fake does too.
+    if (this.samples.has(sample.id)) throw new Error(`ALREADY_EXISTS: ${sample.id}`);
     if (this.mine(sample.userId).some((s) => s.name === sample.name)) throw new SampleNameTaken(sample.name);
     this.samples.set(sample.id, structuredClone(sample));
     return structuredClone(sample);

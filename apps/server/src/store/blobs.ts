@@ -1,10 +1,11 @@
+import { UPLOAD_SIZE_HEADERS } from "@jam/shared";
 import type { getStorage } from "firebase-admin/storage";
 
 type Bucket = ReturnType<ReturnType<typeof getStorage>["bucket"]>;
 
 /** Audio files in the private samples bucket. Clients only ever see signed URLs. */
 export interface SampleBlobs {
-  /** A signed PUT URL. The client must send the same Content-Type. */
+  /** A signed PUT URL. The client must send the same Content-Type and UPLOAD_SIZE_HEADERS. */
   uploadUrl(path: string, contentType: string): Promise<string>;
   /** A signed GET URL, valid for one hour. */
   readUrl(path: string): Promise<string>;
@@ -19,12 +20,16 @@ const READ_TTL_MS = 60 * 60_000;
 
 /** Signs with the runtime service account (IAM signBlob), so it needs Token Creator on itself. */
 export class GcsBlobs implements SampleBlobs {
-  constructor(private readonly bucket: Bucket) {}
+  constructor(private readonly bucket: Pick<Bucket, "file">) {}
 
   async uploadUrl(path: string, contentType: string) {
-    const [url] = await this.bucket
-      .file(path)
-      .getSignedUrl({ version: "v4", action: "write", contentType, expires: Date.now() + UPLOAD_TTL_MS });
+    const [url] = await this.bucket.file(path).getSignedUrl({
+      version: "v4",
+      action: "write",
+      contentType,
+      extensionHeaders: UPLOAD_SIZE_HEADERS,
+      expires: Date.now() + UPLOAD_TTL_MS,
+    });
     return url;
   }
 

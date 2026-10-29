@@ -1,5 +1,5 @@
 import { SAMPLE_MAX_BYTES, type SampleWithUrl } from "@jam/shared";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import type { Api } from "@/lib/api";
 import { samplesApi } from "@/lib/samples-api";
@@ -9,14 +9,19 @@ import { contentTypeOf, durationOf, toSampleName } from "./sampleFile";
 const REFRESH_MS = 30 * 60_000;
 const NONE: SampleWithUrl[] = [];
 
-type StrudelSamples = (map: Record<string, string>) => Promise<void>;
+type StrudelSamples = (map: Record<string, string | string[]>) => Promise<void>;
 
-/** Registers the library with Strudel, so s("name") plays. Waits for the REPL to put samples() on globalThis. */
-async function registerWithStrudel(list: SampleWithUrl[]) {
+/**
+ * Registers the library with Strudel, so s("name") plays. Waits for the REPL to put samples() on globalThis.
+ * samples() only adds names, so a deleted name is set to an empty list, which makes it silent.
+ */
+export async function registerWithStrudel(list: SampleWithUrl[], removed: string[] = []) {
   const scope = globalThis as { samples?: StrudelSamples };
   // ponytail: polls up to a minute for the REPL to load; an event from StrudelEditor if this ever misses
   for (let i = 0; !scope.samples && i < 120; i++) await new Promise((r) => setTimeout(r, 500));
-  await scope.samples?.(Object.fromEntries(list.map((s) => [s.name, s.url])));
+  const map: Record<string, string | string[]> = Object.fromEntries(removed.map((name) => [name, []]));
+  for (const s of list) map[s.name] = s.url;
+  await scope.samples?.(map);
 }
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
@@ -50,8 +55,12 @@ export function useSamples(api: Api | null) {
 
   const samples = loaded && loaded.client === client ? loaded.samples : NONE;
 
+  // Names registered before, so a delete can clear them from Strudel's map.
+  const registered = useRef(new Set<string>());
   useEffect(() => {
-    if (samples.length > 0) registerWithStrudel(samples).catch(console.error);
+    const removed = [...registered.current].filter((name) => !samples.some((s) => s.name === name));
+    registered.current = new Set(samples.map((s) => s.name));
+    registerWithStrudel(samples, removed).catch(console.error);
   }, [samples]);
 
   const upload = useCallback(
