@@ -1,4 +1,4 @@
-import type { SessionPlan, TokenInfo } from "@jam/shared";
+import type { GrantInfo, SessionPlan, TokenInfo } from "@jam/shared";
 import { useState } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { AccountSection } from "@/features/auth/AccountSection";
@@ -12,19 +12,21 @@ export interface SidePanelProps {
   plan: SessionPlan | null;
   tokens: TokenInfo[];
   freshToken: string | null;
+  grants: GrantInfo[];
   origin: string;
   onSignIn: () => void;
   onSignOut: () => void;
   onCreateToken: (label: string) => void;
   onRevokeToken: (id: string) => void;
+  onRevokeGrant: (id: string) => void;
 }
 
 export function SidePanel(props: SidePanelProps) {
-  const { profile, plan, tokens, freshToken } = props;
-  // "Connect" is collapsed once a key exists and opens to show a new one. A manual
-  // toggle holds until the next new key.
+  const { profile, plan, tokens, freshToken, grants } = props;
+  // "Connect" is collapsed once a key or a connected app exists, and opens to show a
+  // new key. A manual toggle holds until the next new key.
   const [manual, setManual] = useState<{ forToken: string | null; open: boolean } | null>(null);
-  const autoOpen = !profile || tokens.length === 0 || !!freshToken;
+  const autoOpen = !profile || (tokens.length === 0 && grants.length === 0) || !!freshToken;
   const connectOpen = manual && manual.forToken === freshToken ? manual.open : autoOpen;
   const setConnectOpen = (open: boolean) => setManual({ forToken: freshToken, open });
 
@@ -41,8 +43,10 @@ export function SidePanel(props: SidePanelProps) {
               origin={props.origin}
               tokens={tokens}
               fresh={freshToken}
+              grants={grants}
               onCreate={props.onCreateToken}
               onRevoke={props.onRevokeToken}
+              onRevokeGrant={props.onRevokeGrant}
             />
           </PanelCard>
           <PanelCard title="Account">

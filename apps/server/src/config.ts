@@ -5,6 +5,8 @@ const envSchema = z.object({
   GOOGLE_CLOUD_PROJECT: z.string().min(1).default("teejayproject"),
   FIRESTORE_DATABASE: z.string().min(1).default("jam-db"),
   STATIC_DIR: z.string().optional(),
+  /** The public origin: the OAuth issuer, and `<origin>/mcp` is the MCP resource. */
+  PUBLIC_URL: z.url().default("https://jam.tn07.dev"),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
 });
 

@@ -1,7 +1,9 @@
 import express, { type NextFunction, type Request, type Response } from "express";
-import { personalTokenAuthenticator, type McpAuthenticator } from "./auth/mcpAuth.js";
+import { personalTokenAuthenticator } from "./auth/mcpAuth.js";
 import { requireUser, type IdTokenVerifier } from "./auth/userAuth.js";
 import { errorFields, silentLogger, type Logger } from "./logger.js";
+import { createOAuth, type OAuthOptions } from "./oauth/index.js";
+import type { DocumentFetcher } from "./oauth/metadataDocument.js";
 import { audioRouter } from "./routes/audio.js";
 import { mcpRouter } from "./routes/mcp.js";
 import { planRouter } from "./routes/plan.js";
@@ -15,8 +17,10 @@ export interface AppDeps {
   store: Store;
   sounds: SoundIndex;
   verifyIdToken: IdTokenVerifier;
-  /** Extra MCP authenticators (phase 2: OAuth). Personal tokens are always on. */
-  extraAuthenticators?: McpAuthenticator[];
+  /** OAuth settings; the defaults are production's. Tests shorten lifetimes and inject a clock. */
+  oauth?: OAuthOptions;
+  /** Fetches client metadata documents. Tests inject a fake; production fetches over https. */
+  fetchDocument?: DocumentFetcher;
   staticDir?: string;
   log?: Logger;
 }
@@ -25,7 +29,8 @@ export function createApp({
   store,
   sounds,
   verifyIdToken,
-  extraAuthenticators = [],
+  oauth: oauthOptions,
+  fetchDocument,
   staticDir,
   log = silentLogger,
 }: AppDeps) {
@@ -38,6 +43,11 @@ export function createApp({
     res.json({ ok: true });
   });
 
+  const oauth = createOAuth({ store, verifyIdToken, log, staticDir, options: oauthOptions, fetchDocument });
+  app.use(oauth.routes);
+  // Before the /api router: reading a consent request needs no user, only the browser cookie.
+  app.use("/api/oauth", oauth.consent);
+
   const api = express.Router();
   api.use(express.json({ limit: "200kb" }));
   api.use(requireUser(verifyIdToken));
@@ -47,8 +57,9 @@ export function createApp({
   api.use("/tokens", tokensRouter(store, log));
   app.use("/api", api);
 
-  const authenticators = [personalTokenAuthenticator(store, log), ...extraAuthenticators];
-  app.use("/mcp", mcpRouter({ store, sounds, authenticators, log }));
+  const authenticators = [personalTokenAuthenticator(store, log), oauth.authenticator];
+  const challenge = { resourceMetadataUrl: oauth.settings.resourceMetadataUrl, scope: oauth.settings.scope };
+  app.use("/mcp", mcpRouter({ store, sounds, authenticators, challenge, log }));
 
   if (staticDir) app.use(staticRouter(staticDir));
 

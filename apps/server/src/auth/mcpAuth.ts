@@ -1,6 +1,6 @@
-// MCP auth is a list of authenticators tried in order. Phase 1 has one: the
-// personal token minted on the page. Phase 2 adds an OAuth 2.1 access-token
-// authenticator to the same list, so the MCP route does not change.
+// MCP auth is a list of authenticators tried in order: the personal key
+// minted on the page (`jam_...`), then an OAuth 2.1 access token
+// (`jama_...`, see src/oauth). The MCP route does not know which one ran.
 
 import type { NextFunction, Request, Response } from "express";
 import type { Logger } from "../logger.js";
@@ -11,6 +11,14 @@ import { hashToken, TOKEN_PREFIX } from "./tokens.js";
 export interface Principal {
   uid: string;
   via: "personal-token" | "oauth";
+  /** The OAuth client, when via is "oauth". */
+  clientId?: string;
+}
+
+export interface McpAuthChallenge {
+  /** RFC 9728 metadata URL, sent in WWW-Authenticate so a client can discover OAuth. */
+  resourceMetadataUrl: string;
+  scope: string;
 }
 
 export type McpAuthenticator = (bearer: string) => Promise<Principal | null>;
@@ -29,7 +37,7 @@ export function personalTokenAuthenticator(store: Store, log: Logger): McpAuthen
   };
 }
 
-export function requireMcpAuth(authenticators: McpAuthenticator[]) {
+export function requireMcpAuth(authenticators: McpAuthenticator[], challenge: McpAuthChallenge) {
   return async (req: Request, res: Response, next: NextFunction) => {
     const bearer = bearerFrom(req);
     if (bearer) {
@@ -45,9 +53,18 @@ export function requireMcpAuth(authenticators: McpAuthenticator[]) {
         return next(err);
       }
     }
+    const params = [
+      'realm="jam"',
+      ...(bearer ? ['error="invalid_token"'] : []),
+      `resource_metadata="${challenge.resourceMetadataUrl}"`,
+      `scope="${challenge.scope}"`,
+    ];
     res
       .status(401)
-      .set("WWW-Authenticate", 'Bearer realm="jam"')
-      .json({ error: "unauthorized", message: "Send Authorization: Bearer <token>. Create a token on the jam page." });
+      .set("WWW-Authenticate", `Bearer ${params.join(", ")}`)
+      .json({
+        error: bearer ? "invalid_token" : "unauthorized",
+        message: "Sign in through OAuth, or send Authorization: Bearer <key> with a key from the jam page.",
+      });
   };
 }

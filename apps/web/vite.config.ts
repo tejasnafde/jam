@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
+const API = "http://localhost:8080";
 const src = (p: string) => fileURLToPath(new URL(p, import.meta.url));
 
 export default defineConfig({
@@ -17,7 +18,19 @@ export default defineConfig({
   build: { chunkSizeWarningLimit: 6000 },
   server: {
     port: 5173,
-    proxy: { "/api": "http://localhost:8080", "/mcp": "http://localhost:8080" },
+    proxy: {
+      "/api": API,
+      "/mcp": API,
+      "/.well-known": API,
+      "/register": API,
+      "/token": API,
+      "/revoke": API,
+      // The server handles /authorize?client_id=...; the consent page (/authorize?request=...) is this app.
+      "/authorize": {
+        target: API,
+        bypass: (req) => (new URL(req.url ?? "/", "http://x").searchParams.has("request") ? "/index.html" : undefined),
+      },
+    },
   },
   test: {
     name: "web",

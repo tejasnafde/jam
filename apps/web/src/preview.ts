@@ -23,9 +23,13 @@ export const PREVIEW_PANEL: PanelOverride = {
     ],
   },
   tokens: [{ id: "h1", label: "Claude Code", createdAt: "", lastUsedAt: new Date(Date.now() - 180_000).toISOString() }],
+  grants: [
+    { id: "g1", clientName: "Claude", createdAt: "", lastUsedAt: new Date(Date.now() - 3_600_000).toISOString() },
+  ],
   freshToken: "jam_q8Zx2LkP0vR7mNa4tY1sWc9eHd3fGb6uJi5oKl0pXz",
   onSignIn: () => {},
   onSignOut: () => {},
   onCreateToken: () => {},
   onRevokeToken: () => {},
+  onRevokeGrant: () => {},
 };

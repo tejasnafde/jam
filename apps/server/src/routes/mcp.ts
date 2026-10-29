@@ -1,6 +1,6 @@
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import express, { Router, type Request, type Response } from "express";
-import { requireMcpAuth, type McpAuthenticator } from "../auth/mcpAuth.js";
+import { requireMcpAuth, type McpAuthChallenge, type McpAuthenticator } from "../auth/mcpAuth.js";
 import type { Logger } from "../logger.js";
 import { buildMcpServer } from "../mcp/server.js";
 import type { SoundIndex } from "../sounds/soundIndex.js";
@@ -11,6 +11,7 @@ interface McpRouteDeps {
   store: Store;
   sounds: SoundIndex;
   authenticators: McpAuthenticator[];
+  challenge: McpAuthChallenge;
   log: Logger;
 }
 
@@ -22,9 +23,9 @@ const methodNotAllowed = (_req: Request, res: Response) => {
     .json({ jsonrpc: "2.0", error: { code: -32000, message: "Method not allowed." }, id: null });
 };
 
-export function mcpRouter({ store, sounds, authenticators, log }: McpRouteDeps) {
+export function mcpRouter({ store, sounds, authenticators, challenge, log }: McpRouteDeps) {
   const router = Router();
-  const auth = requireMcpAuth(authenticators);
+  const auth = requireMcpAuth(authenticators, challenge);
 
   router.post(
     "/",
@@ -41,7 +42,7 @@ export function mcpRouter({ store, sounds, authenticators, log }: McpRouteDeps) 
       });
       const body: unknown = req.body;
       const method = typeof body === "object" && body && "method" in body ? String(body.method) : "batch";
-      log.info("mcp request", { uid: principal.uid, via: principal.via, method });
+      log.info("mcp request", { uid: principal.uid, via: principal.via, clientId: principal.clientId, method });
       await server.connect(transport);
       await transport.handleRequest(req, res, body);
     }),

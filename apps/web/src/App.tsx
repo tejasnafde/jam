@@ -5,6 +5,7 @@ import { TopBar } from "@/components/TopBar";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/features/auth/authContext";
 import { UserAvatar } from "@/features/auth/UserAvatar";
+import { useGrants } from "@/features/connect/useGrants";
 import { useTokens } from "@/features/connect/useTokens";
 import { EditorPane } from "@/features/editor/EditorPane";
 import type { StrudelEditorHandle } from "@/features/editor/StrudelEditor";
@@ -20,6 +21,7 @@ export function App({ panelOverride }: { panelOverride?: PanelOverride }) {
   const auth = useAuth();
   const plan = usePlan(auth.api);
   const tokens = useTokens(auth.api);
+  const grants = useGrants(auth.api);
   const editor = useRef<StrudelEditorHandle | null>(null);
   const [playing, setPlaying] = useState(false);
   const [panelOpen, setPanelOpen] = useLocalStorageFlag("jam:panel", true);
@@ -31,11 +33,13 @@ export function App({ panelOverride }: { panelOverride?: PanelOverride }) {
     plan,
     tokens: tokens.tokens,
     freshToken: tokens.fresh,
+    grants: grants.grants,
     origin: window.location.origin,
     onSignIn: () => void auth.signIn(),
     onSignOut: () => void auth.signOut(),
     onCreateToken: (label) => void tokens.create(label),
     onRevokeToken: (id) => void tokens.revoke(id),
+    onRevokeGrant: (id) => void grants.revoke(id),
     ...panelOverride,
   };
 

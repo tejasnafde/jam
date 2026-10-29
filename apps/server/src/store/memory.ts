@@ -1,5 +1,15 @@
 import type { AudioSnapshot, CodeVersion, PlanInput, SessionPlan } from "@jam/shared";
-import type { NewAudioSnapshot, PlanPatch, Store, TokenRecord } from "./types.js";
+import type {
+  AuthCodeRecord,
+  AuthRequestRecord,
+  GrantRecord,
+  NewAudioSnapshot,
+  OAuthClientRecord,
+  OAuthTokenRecord,
+  PlanPatch,
+  Store,
+  TokenRecord,
+} from "./types.js";
 
 /** An in-memory Store for tests and local runs. Never used in production. */
 export class MemoryStore implements Store {
@@ -7,6 +17,11 @@ export class MemoryStore implements Store {
   readonly audio = new Map<string, AudioSnapshot[]>();
   readonly plans = new Map<string, SessionPlan[]>();
   readonly tokens = new Map<string, TokenRecord>();
+  readonly oauthClients = new Map<string, OAuthClientRecord>();
+  readonly authRequests = new Map<string, AuthRequestRecord>();
+  readonly authCodes = new Map<string, AuthCodeRecord>();
+  readonly grants = new Map<string, GrantRecord>();
+  readonly oauthTokens = new Map<string, OAuthTokenRecord>();
   private seq = 0;
 
   private nextId() {
@@ -103,5 +118,93 @@ export class MemoryStore implements Store {
     const record = this.tokens.get(hash);
     if (!record || record.uid !== uid) return false;
     return this.tokens.delete(hash);
+  }
+
+  async saveOAuthClient(client: OAuthClientRecord) {
+    this.oauthClients.set(client.clientId, structuredClone(client));
+  }
+
+  async getOAuthClient(clientId: string) {
+    const client = this.oauthClients.get(clientId);
+    return client ? structuredClone(client) : null;
+  }
+
+  async saveAuthRequest(request: AuthRequestRecord) {
+    this.authRequests.set(request.id, structuredClone(request));
+  }
+
+  async getAuthRequest(id: string) {
+    const request = this.authRequests.get(id);
+    return request ? structuredClone(request) : null;
+  }
+
+  async takeAuthRequest(id: string) {
+    const request = this.authRequests.get(id);
+    this.authRequests.delete(id);
+    return request ? structuredClone(request) : null;
+  }
+
+  async saveAuthCode(code: AuthCodeRecord) {
+    this.authCodes.set(code.hash, structuredClone(code));
+  }
+
+  async getAuthCode(hash: string) {
+    const code = this.authCodes.get(hash);
+    return code ? structuredClone(code) : null;
+  }
+
+  async useAuthCode(hash: string, at: number) {
+    const code = this.authCodes.get(hash);
+    if (!code) return null;
+    const before = structuredClone(code);
+    code.usedAt ??= at;
+    return before;
+  }
+
+  async saveGrant(grant: GrantRecord) {
+    this.grants.set(grant.id, structuredClone(grant));
+  }
+
+  async getGrant(id: string) {
+    const grant = this.grants.get(id);
+    return grant ? structuredClone(grant) : null;
+  }
+
+  async listGrants(uid: string) {
+    return [...this.grants.values()]
+      .filter((g) => g.uid === uid)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .map((g) => structuredClone(g));
+  }
+
+  async touchGrant(id: string) {
+    const grant = this.grants.get(id);
+    if (grant) grant.lastUsedAt = this.nextTime();
+  }
+
+  async deleteGrant(id: string) {
+    this.grants.delete(id);
+    for (const [hash, token] of this.oauthTokens) if (token.grantId === id) this.oauthTokens.delete(hash);
+  }
+
+  async saveOAuthToken(token: OAuthTokenRecord) {
+    this.oauthTokens.set(token.hash, structuredClone(token));
+  }
+
+  async getOAuthToken(hash: string) {
+    const token = this.oauthTokens.get(hash);
+    return token ? structuredClone(token) : null;
+  }
+
+  async rotateRefreshToken(hash: string, at: number) {
+    const token = this.oauthTokens.get(hash);
+    if (!token) return null;
+    const before = structuredClone(token);
+    if (token.kind === "refresh") token.rotatedAt ??= at;
+    return before;
+  }
+
+  async deleteOAuthToken(hash: string) {
+    this.oauthTokens.delete(hash);
   }
 }
