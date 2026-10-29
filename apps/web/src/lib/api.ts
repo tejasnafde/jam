@@ -35,6 +35,8 @@ export function createApi(getIdToken: GetIdToken, base = "/api") {
   const post = <T>(path: string, body: unknown) => call<T>(path, { method: "POST", body: JSON.stringify(body) });
 
   return {
+    /** The raw authenticated call, for feature clients such as samples-api. */
+    request: call,
     saveVersion: (code: string) => post<SaveVersionResponse>("/versions", { code }),
     latestVersion: () => call<CodeVersion | null>("/versions/latest"),
     saveAudio: (snapshot: SaveAudioRequest) => post<{ id: string }>("/audio", snapshot),

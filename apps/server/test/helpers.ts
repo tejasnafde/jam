@@ -2,7 +2,9 @@ import request from "supertest";
 import { expect } from "vitest";
 import { createApp } from "../src/app.js";
 import { SoundIndex } from "../src/sounds/soundIndex.js";
+import { MemoryBlobs } from "../src/store/blobs.js";
 import { MemoryStore } from "../src/store/memory.js";
+import { MemorySampleStore } from "../src/store/samples.js";
 
 /** Fake Firebase: "id-<uid>" is a valid ID token for <uid>. */
 export const verifyIdToken = async (token: string) => {
@@ -25,8 +27,10 @@ export const fakeFetcher = async (url: string) => {
 
 export function setup() {
   const store = new MemoryStore();
-  const app = createApp({ store, sounds: new SoundIndex(fakeFetcher), verifyIdToken });
-  return { store, app, ...clients(app) };
+  const samples = new MemorySampleStore();
+  const blobs = new MemoryBlobs();
+  const app = createApp({ store, samples, blobs, sounds: new SoundIndex(fakeFetcher), verifyIdToken });
+  return { store, samples, blobs, app, ...clients(app) };
 }
 
 const ACCEPT = "application/json, text/event-stream";

@@ -9,7 +9,9 @@ import { registerStartSession } from "./prompts/startSession.js";
 import { registerGetAudioSnapshot } from "./tools/getAudioSnapshot.js";
 import { registerGetCurrentCode } from "./tools/getCurrentCode.js";
 import { registerGetHistory } from "./tools/getHistory.js";
+import { registerGetSample } from "./tools/getSample.js";
 import { registerGetSessionPlan } from "./tools/getSessionPlan.js";
+import { registerListSamples } from "./tools/listSamples.js";
 import { registerLookupSound } from "./tools/lookupSound.js";
 import { registerSetSessionPlan } from "./tools/setSessionPlan.js";
 import { registerSetStage } from "./tools/setStage.js";
@@ -20,6 +22,8 @@ const TOOLS: Record<string, ToolRegistrar> = {
   get_audio_snapshot: registerGetAudioSnapshot,
   lookup_sound: registerLookupSound,
   get_session_plan: registerGetSessionPlan,
+  list_samples: registerListSamples,
+  get_sample: registerGetSample,
   set_session_plan: registerSetSessionPlan,
   set_stage: registerSetStage,
 };
