@@ -3,7 +3,7 @@
 // fetch is the one place where this server reaches out to a URL that someone
 // else chose. Hence the guard: https on port 443 only, no IP literals, no
 // redirects, a public address only (checked at connect time, so DNS
-// rebinding cannot swap it), a 5 s timeout and a 32 KB cap.
+// rebinding cannot swap it), a 5 s total deadline and a 32 KB cap.
 
 import { lookup as dnsLookup, type LookupAddress } from "node:dns";
 import https from "node:https";
@@ -35,6 +35,11 @@ for (const [net, prefix] of [
 }
 for (const [net, prefix] of [
   ["::", 127],
+  // IPv4-compatible (deprecated), 6to4 and local-use NAT64 addresses embed an
+  // IPv4 address, which can be a private one such as 169.254.169.254.
+  ["::", 96],
+  ["2002::", 16],
+  ["64:ff9b:1::", 48],
   ["64:ff9b::", 96],
   ["100::", 64],
   ["2001:db8::", 32],
@@ -92,7 +97,14 @@ export const fetchMetadataDocument: DocumentFetcher = (url) =>
     if (!isMetadataDocumentUrl(url)) return reject(new Error("not a metadata document URL"));
     const req = https.get(
       url,
-      { timeout: TIMEOUT_MS, lookup: guardedLookup, headers: { accept: "application/json" } },
+      {
+        // A total deadline from the start: `timeout` alone is only an idle
+        // timeout, which a server that sends 1 byte every few seconds defeats.
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+        timeout: TIMEOUT_MS,
+        lookup: guardedLookup,
+        headers: { accept: "application/json" },
+      },
       (res) => {
         if (res.statusCode !== 200) {
           res.resume();
@@ -116,6 +128,7 @@ export const fetchMetadataDocument: DocumentFetcher = (url) =>
           }
         });
         res.on("error", reject);
+        res.on("aborted", () => reject(new Error("aborted")));
       },
     );
     req.on("timeout", () => req.destroy(new Error("timeout")));

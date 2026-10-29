@@ -135,7 +135,7 @@ export function consentRouter({ store, clients, provider, settings, verifyIdToke
         res.status(404).end();
         return;
       }
-      await store.deleteGrant(grant.id);
+      await provider.deleteGrant(grant.id);
       log.info("oauth grant revoked", { uid, clientId: grant.clientId });
       res.status(204).end();
     }),

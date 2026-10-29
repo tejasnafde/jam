@@ -9,6 +9,9 @@ export interface TokenRecord {
   lastUsedAt: string | null;
 }
 
+/** How long a registered client lives when no grant claims it. */
+export const UNCLAIMED_CLIENT_TTL_MS = 24 * 60 * 60 * 1000;
+
 /** A registered OAuth client (dynamic registration) or a fetched client metadata document. */
 export interface OAuthClientRecord {
   clientId: string;
@@ -111,6 +114,11 @@ export interface Store extends OAuthStore {
 
 /** OAuth state. Every token and code is stored by hash only. */
 export interface OAuthStore {
+  /**
+   * Saves a registered client. A client that no grant claims within
+   * UNCLAIMED_CLIENT_TTL_MS is deleted (Firestore TTL on `expireAt`), so
+   * registrations that never lead to a consent do not pile up.
+   */
   saveOAuthClient(client: OAuthClientRecord): Promise<void>;
   getOAuthClient(clientId: string): Promise<OAuthClientRecord | null>;
   saveAuthRequest(request: AuthRequestRecord): Promise<void>;
@@ -119,8 +127,17 @@ export interface OAuthStore {
   takeAuthRequest(id: string): Promise<AuthRequestRecord | null>;
   saveAuthCode(code: AuthCodeRecord): Promise<void>;
   getAuthCode(hash: string): Promise<AuthCodeRecord | null>;
-  /** Atomically marks the code used. Returns the record as it was before, so a replay shows `usedAt`. */
-  useAuthCode(hash: string, at: number): Promise<AuthCodeRecord | null>;
+  /**
+   * Atomically marks the code used. When the code was unused and `grantFor`
+   * returns a grant, the same transaction saves the grant and claims the
+   * client (it no longer expires). So a replay of the code always finds the
+   * grant to revoke. Returns the code as it was before, so a replay shows `usedAt`.
+   */
+  redeemAuthCode(
+    hash: string,
+    at: number,
+    grantFor: (code: AuthCodeRecord) => GrantRecord | null,
+  ): Promise<AuthCodeRecord | null>;
   saveGrant(grant: GrantRecord): Promise<void>;
   getGrant(id: string): Promise<GrantRecord | null>;
   /** Newest first. */

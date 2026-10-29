@@ -10,10 +10,11 @@
 //   oauthGrants/{id}            GrantRecord
 //   oauthTokens/{sha256(token)} OAuthTokenRecord
 // Requests, codes and OAuth tokens carry `expireAt` (a Timestamp) for a Firestore TTL policy.
+// A registered client carries it too, until a grant claims it (24 h after registration).
 // Every query is a single-field equality, so no composite index is needed.
 
 import type { AudioSnapshot, CodeVersion, PlanInput, SessionPlan } from "@jam/shared";
-import type { DocumentSnapshot, Firestore } from "firebase-admin/firestore";
+import { FieldValue, type DocumentSnapshot, type Firestore } from "firebase-admin/firestore";
 import { createHash } from "node:crypto";
 import type {
   AuthCodeRecord,
@@ -26,6 +27,7 @@ import type {
   Store,
   TokenRecord,
 } from "./types.js";
+import { UNCLAIMED_CLIENT_TTL_MS } from "./types.js";
 
 const now = () => new Date().toISOString();
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -150,7 +152,10 @@ export class FirestoreStore implements Store {
   }
 
   async saveOAuthClient(client: OAuthClientRecord) {
-    await this.oauth("oauthClients").doc(sha256(client.clientId)).set(client);
+    const expireAt = new Date(client.clientIdIssuedAt * 1000 + UNCLAIMED_CLIENT_TTL_MS);
+    await this.oauth("oauthClients")
+      .doc(sha256(client.clientId))
+      .set({ ...client, expireAt });
   }
 
   async getOAuthClient(clientId: string) {
@@ -186,11 +191,20 @@ export class FirestoreStore implements Store {
     return record<AuthCodeRecord>(await this.oauth("oauthCodes").doc(hash).get());
   }
 
-  async useAuthCode(hash: string, at: number) {
+  async redeemAuthCode(hash: string, at: number, grantFor: (code: AuthCodeRecord) => GrantRecord | null) {
     const ref = this.oauth("oauthCodes").doc(hash);
     return this.db.runTransaction(async (tx) => {
       const found = record<AuthCodeRecord>(await tx.get(ref));
-      if (found && found.usedAt === null) tx.update(ref, { usedAt: at });
+      if (!found || found.usedAt !== null) return found;
+      const grant = grantFor(found);
+      // Every read comes before the first write in a Firestore transaction.
+      const clientRef = this.oauth("oauthClients").doc(sha256(found.clientId));
+      const client = grant ? await tx.get(clientRef) : null;
+      tx.update(ref, { usedAt: at });
+      if (grant) {
+        tx.set(this.oauth("oauthGrants").doc(grant.id), grant);
+        if (client?.exists) tx.update(clientRef, { expireAt: FieldValue.delete() });
+      }
       return found;
     });
   }

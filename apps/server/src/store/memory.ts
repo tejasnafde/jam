@@ -22,6 +22,8 @@ export class MemoryStore implements Store {
   readonly authCodes = new Map<string, AuthCodeRecord>();
   readonly grants = new Map<string, GrantRecord>();
   readonly oauthTokens = new Map<string, OAuthTokenRecord>();
+  /** Registered clients that no grant has claimed yet (Firestore: `expireAt` is set). */
+  readonly unclaimedClients = new Set<string>();
   private seq = 0;
 
   private nextId() {
@@ -122,6 +124,7 @@ export class MemoryStore implements Store {
 
   async saveOAuthClient(client: OAuthClientRecord) {
     this.oauthClients.set(client.clientId, structuredClone(client));
+    this.unclaimedClients.add(client.clientId);
   }
 
   async getOAuthClient(clientId: string) {
@@ -153,11 +156,17 @@ export class MemoryStore implements Store {
     return code ? structuredClone(code) : null;
   }
 
-  async useAuthCode(hash: string, at: number) {
+  async redeemAuthCode(hash: string, at: number, grantFor: (code: AuthCodeRecord) => GrantRecord | null) {
     const code = this.authCodes.get(hash);
     if (!code) return null;
     const before = structuredClone(code);
-    code.usedAt ??= at;
+    if (code.usedAt !== null) return before;
+    const grant = grantFor(before);
+    code.usedAt = at;
+    if (grant) {
+      this.grants.set(grant.id, structuredClone(grant));
+      this.unclaimedClients.delete(grant.clientId);
+    }
     return before;
   }
 

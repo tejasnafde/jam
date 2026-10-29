@@ -103,18 +103,24 @@ The endpoints follow the MCP authorization spec. They use the MCP SDK's handlers
 
 - A 401 from `/mcp` carries `WWW-Authenticate: Bearer resource_metadata="https://jam.tn07.dev/.well-known/oauth-protected-resource"`,
   which is how a client finds the rest.
-- **Clients.** Dynamic registration, rate limited per IP. A client can also use the https URL of a Client ID Metadata
-  Document as its `client_id`; jam fetches it over https only, to a public address only, with a 5 s timeout and a 32 KB
-  cap. Redirect URIs must be https, or http on `localhost`, `127.0.0.1` or `[::1]` (any port, RFC 8252). Matching is
+- **Clients.** Dynamic registration, rate limited per IP and capped at 200 registrations per hour per instance. A
+  registered client that no grant claims within 24 hours expires (the `oauthClients` TTL below). A client can also use
+  the https URL of a Client ID Metadata Document as its `client_id`; jam fetches it over https only, to a public address
+  only, with a 5 s total deadline, a 32 KB cap, one fetch per URL at a time and at most 10 fetches at once. Redirect URIs must be https, or http on `localhost`, `127.0.0.1` or `[::1]` (any port, RFC 8252). Matching is
   exact otherwise. Client authentication: `none`, `client_secret_post` or `client_secret_basic`. Secrets are stored
   hashed and do not expire.
+- **Rate limits and the Worker.** The limits key on the client address. The Worker sends the secret `X-Jam-Edge`
+  header (Worker secret and Secret Manager `JAM_EDGE_SECRET`, the same value), and only then does the server trust
+  `CF-Connecting-IP`. A direct `*.run.app` request is keyed on its socket address. `/token` and `/revoke` are limited
+  before the client lookup. An `/authorize` error goes back to the client only for claude.ai, claude.com and
+  chatgpt.com redirect URIs; for any other client jam shows an error page, so it is not an open redirector.
 - **Consent.** `/authorize` validates the request, stores it server-side for 10 minutes, sets an HttpOnly
   `__Host-jam_oauth` cookie and redirects to `/authorize?request=<id>`, the consent page. The id is not a credential:
   reading or deciding the request needs the same cookie, and deciding also needs the Firebase ID token in a header. A
   request is decided once. The page cannot be framed.
 - **Codes and tokens.** PKCE S256 is required. Codes live 90 s and are single-use; a replayed code revokes what it
   produced. Access tokens are opaque, live 1 hour and are bound to the resource `https://jam.tn07.dev/mcp` (RFC 8707)
-  and the scope `jam`. Refresh tokens live 30 days and rotate on every use; a reused refresh token revokes the grant.
+  and the scope `jam`. Refresh tokens live 30 days and rotate on every use; a reused refresh token revokes the grant, except within 30 s of the rotation (a likely retry), which is only refused.
   Only SHA-256 hashes of codes and tokens are stored. Nothing secret goes in a URL except the standard `code` and
   `state` on the redirect back to the client (Cloud Run logs every URL).
 - **Grants.** Each Allow creates a grant: one connected app. Revoking it (side panel, or `/revoke` with a refresh token)
@@ -122,10 +128,11 @@ The endpoints follow the MCP authorization spec. They use the MCP SDK's handlers
 
 Firestore collections: `oauthClients`, `oauthRequests`, `oauthCodes`, `oauthGrants`, `oauthTokens`. All queries are
 single-field, so there is no composite index. Requests, codes and tokens carry an `expireAt` Timestamp for an optional
-TTL policy, which deletes expired rows (they are already rejected by time):
+TTL policy, which deletes expired rows (they are already rejected by time). A registered client carries `expireAt` (24 h
+after registration) until its first grant removes it:
 
 ```sh
-for c in oauthRequests oauthCodes oauthTokens; do
+for c in oauthRequests oauthCodes oauthTokens oauthClients; do
   gcloud firestore fields ttls update expireAt --collection-group=$c --enable-ttl \
     --database=jam-db --project=teejayproject --async
 done

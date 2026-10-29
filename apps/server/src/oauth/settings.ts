@@ -7,6 +7,8 @@ export interface OAuthRateLimits {
   authorize: number;
   token: number;
   revoke: number;
+  /** Registrations per hour across all callers, per instance. Caps the oauthClients writes. */
+  registerPerHour: number;
 }
 
 export interface OAuthSettings {
@@ -21,6 +23,12 @@ export interface OAuthSettings {
   accessTtlMs: number;
   refreshTtlMs: number;
   rateLimits: OAuthRateLimits | false;
+  /**
+   * The shared secret the Cloudflare Worker sends in X-Jam-Edge. Only a request
+   * that carries it may name its client address in CF-Connecting-IP. Null:
+   * CF-Connecting-IP is never trusted.
+   */
+  edgeSecret: string | null;
   /** The clock, injectable for tests. Milliseconds since the epoch. */
   now: () => number;
 }
@@ -47,7 +55,9 @@ export function oauthSettings(options: OAuthOptions = {}): OAuthSettings {
       authorize: 100,
       token: 200,
       revoke: 50,
+      registerPerHour: 200,
     },
+    edgeSecret: options.edgeSecret ?? null,
     now: options.now ?? Date.now,
   };
 }

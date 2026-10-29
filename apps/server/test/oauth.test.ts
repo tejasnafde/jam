@@ -5,6 +5,7 @@ import path from "node:path";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { isMetadataDocumentUrl, isPublicAddress } from "../src/oauth/metadataDocument.js";
+import { REFRESH_RETRY_GRACE_MS } from "../src/oauth/provider.js";
 import { redirectUriProblem } from "../src/oauth/redirectUris.js";
 import { setup } from "./helpers.js";
 
@@ -15,6 +16,9 @@ const CLAUDE_CB = "https://claude.ai/api/mcp/auth_callback";
 const CLAUDE_COM_CB = "https://claude.com/api/mcp/auth_callback";
 const CHATGPT_CB = "https://chatgpt.com/connector_platform_oauth_redirect";
 const ACCEPT = "application/json, text/event-stream";
+
+const LIMITS = { windowMs: 60_000, register: 100, authorize: 100, token: 100, revoke: 100, registerPerHour: 100 };
+const EDGE_SECRET = "e".repeat(40);
 
 type Ctx = ReturnType<typeof setup>;
 type App = Ctx["app"];
@@ -243,7 +247,7 @@ describe("dynamic client registration", () => {
 
   it("is rate limited", async () => {
     const { app } = setup({
-      oauth: { rateLimits: { windowMs: 60_000, register: 2, authorize: 100, token: 100, revoke: 100 } },
+      oauth: { rateLimits: { ...LIMITS, register: 2 } },
     });
     expect((await register(app)).status).toBe(201);
     expect((await register(app)).status).toBe(201);
@@ -516,6 +520,7 @@ describe("token: refresh_token", () => {
     expect(refreshed.body.access_token).not.toBe(tokens.access_token);
     expect((await listTools(ctx.app, refreshed.body.access_token as string)).status).toBe(200);
 
+    ctx.clock.advance(REFRESH_RETRY_GRACE_MS);
     const replay = await token(ctx.app, {
       grant_type: "refresh_token",
       client_id: client.client_id,
@@ -721,5 +726,235 @@ describe("redirect URI policy", () => {
     expect(redirectUriProblem("http://[::1]:1234/cb")).toBeNull();
     expect(redirectUriProblem("http://example.com/cb")).not.toBeNull();
     expect(redirectUriProblem("javascript:alert(1)")).not.toBeNull();
+  });
+});
+
+describe("rate-limit key (X-Jam-Edge)", () => {
+  const registerFrom = (app: App, ip: string, edge?: string) => {
+    const req = request(app).post("/register").set("CF-Connecting-IP", ip).set("X-Forwarded-For", ip);
+    if (edge !== undefined) req.set("X-Jam-Edge", edge);
+    return req.send({ redirect_uris: [CLAUDE_CB], token_endpoint_auth_method: "none" });
+  };
+
+  it("trusts CF-Connecting-IP only with the Worker's secret", async () => {
+    const { app } = setup({ oauth: { rateLimits: { ...LIMITS, register: 2 }, edgeSecret: EDGE_SECRET } });
+    // Spoofed addresses without the secret, or with a wrong one, share the socket's bucket.
+    expect((await registerFrom(app, "1.1.1.1")).status).toBe(201);
+    expect((await registerFrom(app, "2.2.2.2", "wrong")).status).toBe(201);
+    expect((await registerFrom(app, "3.3.3.3")).status).toBe(429);
+    // Through the Worker, each client address has its own bucket.
+    for (const ip of ["4.4.4.4", "4.4.4.4", "5.5.5.5"]) {
+      expect((await registerFrom(app, ip, EDGE_SECRET)).status, ip).toBe(201);
+    }
+    expect((await registerFrom(app, "4.4.4.4", EDGE_SECRET)).status).toBe(429);
+  });
+
+  it("never trusts CF-Connecting-IP when no secret is configured", async () => {
+    const { app } = setup({ oauth: { rateLimits: { ...LIMITS, register: 1 } } });
+    expect((await registerFrom(app, "1.1.1.1", EDGE_SECRET)).status).toBe(201);
+    expect((await registerFrom(app, "2.2.2.2", EDGE_SECRET)).status).toBe(429);
+  });
+
+  it("caps registrations per hour across all callers", async () => {
+    const { app, clock } = setup({ oauth: { rateLimits: { ...LIMITS, registerPerHour: 2 }, edgeSecret: EDGE_SECRET } });
+    expect((await registerFrom(app, "1.1.1.1", EDGE_SECRET)).status).toBe(201);
+    expect((await registerFrom(app, "2.2.2.2", EDGE_SECRET)).status).toBe(201);
+    const third = await registerFrom(app, "3.3.3.3", EDGE_SECRET);
+    expect(third.status).toBe(429);
+    expect(third.body.error).toBe("too_many_requests");
+    expect(clock.now()).toBeGreaterThan(0);
+  });
+
+  it("marks a new client unclaimed until a grant claims it", async () => {
+    const ctx = setup();
+    const unused = await registerClient(ctx.app);
+    const { client } = await connect(ctx);
+    expect(ctx.store.unclaimedClients.has(unused.client_id)).toBe(true);
+    expect(ctx.store.unclaimedClients.has(client.client_id)).toBe(false);
+  });
+});
+
+describe("client metadata document fetches", () => {
+  const DOC_URL = "https://client.example/oauth/metadata.json";
+  const docFor = (url: string) => ({ client_id: url, redirect_uris: [CLAUDE_CB], token_endpoint_auth_method: "none" });
+
+  /** A fetcher whose fetches stay open until the test releases them. */
+  function slowFetcher() {
+    const calls: string[] = [];
+    const release: (() => void)[] = [];
+    const fetchDocument = (url: string) =>
+      new Promise<unknown>((resolve) => {
+        calls.push(url);
+        release.push(() => resolve(docFor(url)));
+      });
+    return { calls, fetchDocument, releaseAll: () => release.forEach((r) => r()) };
+  }
+
+  it("shares one fetch between concurrent lookups of the same URL", async () => {
+    const slow = slowFetcher();
+    const { app } = setup({ fetchDocument: slow.fetchDocument });
+    const query = authorizeQuery({ clientId: DOC_URL, challenge: pkce().challenge });
+    const pending = [1, 2, 3].map(() =>
+      request(app)
+        .get("/authorize")
+        .query(query)
+        .then((r) => r),
+    );
+    await new Promise((r) => setTimeout(r, 50));
+    slow.releaseAll();
+    for (const res of await Promise.all(pending)) expect(res.status).toBe(302);
+    expect(slow.calls).toEqual([DOC_URL]);
+  });
+
+  it("limits fetches in flight across URLs", async () => {
+    const slow = slowFetcher();
+    const { app } = setup({ fetchDocument: slow.fetchDocument });
+    const urls = Array.from({ length: 11 }, (_, i) => `https://client.example/doc/${i}`);
+    const pending = urls.map((url) =>
+      request(app)
+        .get("/authorize")
+        .query(authorizeQuery({ clientId: url, challenge: "x" }))
+        .then((r) => r),
+    );
+    await new Promise((r) => setTimeout(r, 100));
+    expect(slow.calls).toHaveLength(10);
+    slow.releaseAll();
+    const statuses = (await Promise.all(pending)).map((r) => r.status);
+    expect(statuses.filter((s) => s === 302)).toHaveLength(10);
+    expect(statuses.filter((s) => s === 400)).toHaveLength(1);
+  });
+
+  it("evicts the least recently used document, not the whole cache", async () => {
+    const fetched: string[] = [];
+    const { app } = setup({
+      fetchDocument: async (url) => {
+        fetched.push(url);
+        return docFor(url);
+      },
+    });
+    const lookup = (url: string) =>
+      request(app)
+        .get("/authorize")
+        .query(authorizeQuery({ clientId: url, challenge: "x" }));
+    await lookup(DOC_URL);
+    for (let i = 0; i < 600; i++) {
+      await lookup(`https://client.example/doc/${i}`);
+      // Used again and again, as claude.ai's document is.
+      if (i % 100 === 0) await lookup(DOC_URL);
+    }
+    await lookup(DOC_URL);
+    expect(fetched.filter((u) => u === DOC_URL)).toHaveLength(1);
+    await lookup("https://client.example/doc/0");
+    expect(fetched.filter((u) => u === "https://client.example/doc/0")).toHaveLength(2);
+  });
+
+  it("rate limits /token before the client lookup", async () => {
+    const fetched: string[] = [];
+    const { app } = setup({
+      oauth: { rateLimits: { ...LIMITS, token: 2 } },
+      fetchDocument: async (url) => {
+        fetched.push(url);
+        throw new Error("down");
+      },
+    });
+    const statuses: number[] = [];
+    for (let i = 0; i < 4; i++) {
+      const res = await token(app, { grant_type: "refresh_token", client_id: `${DOC_URL}?n=${i}`, refresh_token: "x" });
+      statuses.push(res.status);
+    }
+    expect(statuses.slice(2)).toEqual([429, 429]);
+    expect(fetched).toHaveLength(2);
+  });
+});
+
+describe("grant revocation races", () => {
+  it("refuses an access token whose grant is gone", async () => {
+    const ctx = setup();
+    const { tokens } = await connect(ctx);
+    expect((await listTools(ctx.app, tokens.access_token)).status).toBe(200);
+    // As if the grant was deleted while this token was being written.
+    ctx.store.grants.clear();
+    ctx.clock.advance(5_000);
+    expect((await listTools(ctx.app, tokens.access_token)).status).toBe(401);
+  });
+
+  it("a code replayed while the tokens are written still ends the grant", async () => {
+    const ctx = setup();
+    const client = await registerClient(ctx.app);
+    const { code, verifier } = await getCode(ctx.app, client.client_id);
+    const save = ctx.store.saveOAuthToken.bind(ctx.store);
+    let replayed = false;
+    ctx.store.saveOAuthToken = async (record) => {
+      if (!replayed) {
+        replayed = true;
+        // The grant exists already, so the replay can revoke it.
+        expect(ctx.store.grants.size).toBe(1);
+        const replay = await exchange(ctx.app, client.client_id, code, verifier);
+        expect(replay.body.error).toBe("invalid_grant");
+      }
+      return save(record);
+    };
+    const res = await exchange(ctx.app, client.client_id, code, verifier);
+    expect(res.status).toBe(200);
+    expect(ctx.store.grants.size).toBe(0);
+    expect((await listTools(ctx.app, res.body.access_token as string)).status).toBe(401);
+  });
+
+  it("revoking in the side panel ends a cached grant at once on this instance", async () => {
+    const ctx = setup();
+    const { tokens } = await connect(ctx);
+    expect((await listTools(ctx.app, tokens.access_token)).status).toBe(200);
+    const id = (await request(ctx.app).get("/api/oauth/grants").set(ctx.asUser("alice"))).body[0].id as string;
+    await request(ctx.app).delete(`/api/oauth/grants/${id}`).set(ctx.asUser("alice")).expect(204);
+    expect((await listTools(ctx.app, tokens.access_token)).status).toBe(401);
+  });
+});
+
+describe("refresh retry grace", () => {
+  it("refuses a quick retry of a rotated refresh token but keeps the grant", async () => {
+    const ctx = setup();
+    const { client, tokens } = await connect(ctx);
+    const refresh = (refreshToken: string) =>
+      token(ctx.app, { grant_type: "refresh_token", client_id: client.client_id, refresh_token: refreshToken });
+    const first = await refresh(tokens.refresh_token);
+    expect(first.status).toBe(200);
+    ctx.clock.advance(REFRESH_RETRY_GRACE_MS - 1);
+    const retry = await refresh(tokens.refresh_token);
+    expect(retry.status).toBe(400);
+    expect(retry.body.error).toBe("invalid_grant");
+    expect(retry.body.access_token).toBeUndefined();
+    expect((await listTools(ctx.app, first.body.access_token as string)).status).toBe(200);
+    expect((await refresh(first.body.refresh_token as string)).status).toBe(200);
+  });
+});
+
+describe("authorize error redirects", () => {
+  it("shows an error page instead of redirecting to an unknown host", async () => {
+    const { app } = setup();
+    const evil = "https://evil.example/x";
+    const { client_id } = await registerClient(app, { redirect_uris: [evil] });
+    const res = await request(app)
+      .get("/authorize")
+      .query({ ...authorizeQuery({ clientId: client_id, challenge: "x", redirectUri: evil }), response_type: "bad" });
+    expect(res.status).toBe(400);
+    expect(res.headers.location).toBeUndefined();
+    expect(res.text).toContain("invalid_request");
+    expect(res.text).not.toContain("<script");
+  });
+
+  it("still sends a valid request from an unknown host to consent", async () => {
+    const { app } = setup();
+    const other = "https://other.example/cb";
+    const { client_id } = await registerClient(app, { redirect_uris: [other] });
+    await startAuthorize(app, { clientId: client_id, challenge: pkce().challenge, redirectUri: other });
+  });
+});
+
+describe("SSRF guard: IPv6 ranges that embed IPv4", () => {
+  it("blocks IPv4-compatible, 6to4 and local NAT64 addresses", () => {
+    for (const ip of ["::a9fe:a9fe", "::7f00:1", "2002:a9fe:a9fe::1", "64:ff9b:1::a9fe:a9fe"]) {
+      expect(isPublicAddress(ip), ip).toBe(false);
+    }
+    for (const ip of ["8.8.8.8", "2606:4700:4700::1111"]) expect(isPublicAddress(ip), ip).toBe(true);
   });
 });

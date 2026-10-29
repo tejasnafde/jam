@@ -23,6 +23,12 @@ import { isOurResource, type OAuthSettings } from "./settings.js";
 const invalidCode = () => new InvalidGrantError("The authorization code is invalid, expired or already used");
 const invalidRefresh = () => new InvalidGrantError("The refresh token is invalid, expired or already used");
 
+/** A rotated refresh token that comes back within this window is refused, but the grant survives. */
+export const REFRESH_RETRY_GRACE_MS = 30_000;
+/** How long one instance trusts that a grant exists, so a revoke takes effect within this time. */
+const GRANT_CACHE_MS = 5_000;
+const GRANT_CACHE_SIZE = 1000;
+
 /** The grant made from a code. Derived from the code hash, so a replayed code finds the grant to revoke. */
 const grantIdFor = (codeHash: string) => hashSecret(`grant:${codeHash}`).slice(0, 32);
 
@@ -32,6 +38,9 @@ const grantIdFor = (codeHash: string) => hashSecret(`grant:${codeHash}`).slice(0
  * pending consent requests, single-use codes, grants and hashed tokens.
  */
 export class JamOAuthProvider implements OAuthServerProvider {
+  /** Grant id to the time until which it is known to exist. Oldest first. */
+  private readonly liveGrants = new Map<string, number>();
+
   constructor(
     private readonly store: OAuthStore,
     private readonly clients: JamClientsStore,
@@ -96,33 +105,47 @@ export class JamOAuthProvider implements OAuthServerProvider {
     resource?: URL,
   ): Promise<OAuthTokens> {
     const hash = hashSecret(authorizationCode);
-    // Marking the code used comes first, so two racing exchanges cannot both win.
-    const code = await this.store.useAuthCode(hash, this.settings.now());
+    // Read before the transaction: a metadata document fetch must not run inside it.
+    const record = await this.clients.getRecord(client.client_id);
+    const now = this.settings.now();
+    const nowIso = new Date(now).toISOString();
+    const valid = (c: AuthCodeRecord) =>
+      c.clientId === client.client_id &&
+      c.expiresAt > now &&
+      (redirectUri === undefined || redirectUri === c.redirectUri) &&
+      (resource === undefined || isOurResource(this.settings, resource));
+    // Marking the code used comes first, so two racing exchanges cannot both
+    // win. The grant is saved in the same transaction, so a replay that
+    // arrives while the tokens are written still finds the grant to revoke.
+    const code = await this.store.redeemAuthCode(hash, now, (c) =>
+      valid(c)
+        ? {
+            id: grantIdFor(hash),
+            uid: c.uid,
+            clientId: c.clientId,
+            clientName: record ? displayName(record) : client.client_id,
+            scopes: c.scopes,
+            resource: c.resource,
+            createdAt: nowIso,
+            lastUsedAt: nowIso,
+          }
+        : null,
+    );
     if (!code || code.clientId !== client.client_id) throw invalidCode();
     if (code.usedAt !== null) {
       await this.replayed("code", code);
       throw invalidCode();
     }
-    if (code.expiresAt <= this.settings.now()) throw invalidCode();
+    if (code.expiresAt <= now) throw invalidCode();
     if (redirectUri !== undefined && redirectUri !== code.redirectUri) {
       throw new InvalidGrantError("redirect_uri does not match the authorization request");
     }
     this.checkResource(resource);
 
-    const record = await this.clients.getRecord(client.client_id);
-    const nowIso = new Date(this.settings.now()).toISOString();
-    const grant: GrantRecord = {
-      id: grantIdFor(hash),
-      uid: code.uid,
-      clientId: code.clientId,
-      clientName: record ? displayName(record) : client.client_id,
-      scopes: code.scopes,
-      resource: code.resource,
-      createdAt: nowIso,
-      lastUsedAt: nowIso,
-    };
-    await this.enforceGrantLimit(code.uid);
-    await this.store.saveGrant(grant);
+    const grant = await this.store.getGrant(grantIdFor(hash));
+    // Gone already: a replay of this code revoked it between the two reads.
+    if (!grant) throw invalidCode();
+    await this.enforceGrantLimit(code.uid, grant.id);
     this.log.info("oauth grant created", { uid: grant.uid, clientId: grant.clientId, grantId: grant.id });
     return this.issueTokens(grant);
   }
@@ -139,7 +162,9 @@ export class JamOAuthProvider implements OAuthServerProvider {
     const token = await this.store.rotateRefreshToken(hash, this.settings.now());
     if (!token) throw invalidRefresh();
     if (token.rotatedAt !== null) {
-      await this.replayed("refresh token", token);
+      // A retry soon after the rotation is most likely a lost response, not a
+      // theft: refuse it, but keep the grant. Later, end the grant.
+      if (this.settings.now() - token.rotatedAt >= REFRESH_RETRY_GRACE_MS) await this.replayed("refresh token", token);
       throw invalidRefresh();
     }
     if (token.expiresAt <= this.settings.now()) throw invalidRefresh();
@@ -157,6 +182,8 @@ export class JamOAuthProvider implements OAuthServerProvider {
     const record = token.startsWith(ACCESS_PREFIX) ? await this.store.getOAuthToken(hashSecret(token)) : null;
     if (!record || record.kind !== "access") throw new InvalidTokenError("Unknown access token");
     if (record.expiresAt <= this.settings.now()) throw new InvalidTokenError("The access token has expired");
+    // A token written while its grant was being revoked can outlive the grant.
+    if (!(await this.grantExists(record.grantId))) throw new InvalidTokenError("The grant was revoked");
     return {
       token,
       clientId: record.clientId,
@@ -174,11 +201,32 @@ export class JamOAuthProvider implements OAuthServerProvider {
     if (!record || record.clientId !== client.client_id) return;
     if (record.kind === "refresh") {
       // Revoking a refresh token ends the whole grant, with its access tokens.
-      await this.store.deleteGrant(record.grantId);
+      await this.deleteGrant(record.grantId);
       this.log.info("oauth grant revoked by client", { uid: record.uid, clientId: record.clientId });
     } else {
       await this.store.deleteOAuthToken(hash);
     }
+  }
+
+  /** True when the grant exists. A yes is cached for a few seconds per instance, to save a read per MCP call. */
+  private async grantExists(id: string): Promise<boolean> {
+    const now = this.settings.now();
+    const until = this.liveGrants.get(id);
+    if (until !== undefined && until > now) return true;
+    this.liveGrants.delete(id);
+    if (!(await this.store.getGrant(id))) return false;
+    this.liveGrants.set(id, now + GRANT_CACHE_MS);
+    for (const oldest of this.liveGrants.keys()) {
+      if (this.liveGrants.size <= GRANT_CACHE_SIZE) break;
+      this.liveGrants.delete(oldest);
+    }
+    return true;
+  }
+
+  /** Deletes a grant and its tokens, and drops it from this instance's cache. */
+  async deleteGrant(id: string) {
+    this.liveGrants.delete(id);
+    await this.store.deleteGrant(id);
   }
 
   /** Called by the consent page after the user allows. Returns the plaintext code for the redirect. */
@@ -231,13 +279,13 @@ export class JamOAuthProvider implements OAuthServerProvider {
   /** A used code or a rotated refresh token came back: someone may have stolen it. End the grant. */
   private async replayed(what: string, record: AuthCodeRecord | OAuthTokenRecord) {
     const grantId = "grantId" in record ? record.grantId : grantIdFor(record.hash);
-    await this.store.deleteGrant(grantId);
+    await this.deleteGrant(grantId);
     this.log.warn(`oauth ${what} replayed, grant revoked`, { uid: record.uid, clientId: record.clientId });
   }
 
-  /** Keeps a user's connected apps under the cap by dropping the oldest. */
-  private async enforceGrantLimit(uid: string) {
-    const grants = await this.store.listGrants(uid);
-    for (const old of grants.slice(LIMITS.oauthGrantsPerUser - 1)) await this.store.deleteGrant(old.id);
+  /** Keeps a user's connected apps under the cap by dropping the oldest. The new grant always stays. */
+  private async enforceGrantLimit(uid: string, keep: string) {
+    const grants = (await this.store.listGrants(uid)).filter((g) => g.id !== keep);
+    for (const old of grants.slice(LIMITS.oauthGrantsPerUser - 1)) await this.deleteGrant(old.id);
   }
 }

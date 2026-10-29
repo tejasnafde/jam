@@ -7,6 +7,8 @@ const envSchema = z.object({
   STATIC_DIR: z.string().optional(),
   /** The public origin: the OAuth issuer, and `<origin>/mcp` is the MCP resource. */
   PUBLIC_URL: z.url().default("https://jam.tn07.dev"),
+  /** The secret the Cloudflare Worker sends in X-Jam-Edge (Secret Manager JAM_EDGE_SECRET). */
+  JAM_EDGE_SECRET: z.string().min(32).optional(),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
 });
 

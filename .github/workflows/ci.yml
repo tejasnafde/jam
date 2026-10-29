@@ -67,6 +67,7 @@ jobs:
             --labels=app=jam \
             --memory=512Mi --cpu=1 --min-instances=0 --max-instances=4 \
             --set-env-vars="GOOGLE_CLOUD_PROJECT=${PROJECT},FIRESTORE_DATABASE=jam-db" \
+            --set-secrets="JAM_EDGE_SECRET=JAM_EDGE_SECRET:latest" \
             --quiet
 
       - name: Verify it serves

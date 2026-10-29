@@ -14,6 +14,10 @@ const GRANT_TYPES = new Set(["authorization_code", "refresh_token"]);
 const MAX_REDIRECT_URIS = 10;
 const DOCUMENT_CACHE_MS = 60 * 60_000;
 const DOCUMENT_FAILURE_CACHE_MS = 60_000;
+/** Cached documents. The least recently used goes first when it is full. */
+const DOCUMENT_CACHE_SIZE = 500;
+/** Metadata documents fetched at the same time, across all URLs. */
+const MAX_CONCURRENT_FETCHES = 10;
 
 /** Client fields jam reads, from a registration request or a metadata document. */
 const clientFieldsSchema = z.object({
@@ -98,7 +102,10 @@ export function displayName(record: OAuthClientRecord): string {
  * metadata document (fetched and cached in memory).
  */
 export class JamClientsStore implements OAuthRegisteredClientsStore {
+  /** In insertion order, oldest use first: a hit moves the entry to the end. */
   private readonly documents = new Map<string, { record: OAuthClientRecord | null; until: number }>();
+  /** One fetch per URL at a time; concurrent lookups share it. */
+  private readonly inFlight = new Map<string, Promise<OAuthClientRecord | null>>();
 
   constructor(
     private readonly store: OAuthStore,
@@ -143,7 +150,24 @@ export class JamClientsStore implements OAuthRegisteredClientsStore {
 
   private async fromDocument(url: string): Promise<OAuthClientRecord | null> {
     const cached = this.documents.get(url);
-    if (cached && cached.until > this.now()) return cached.record;
+    if (cached && cached.until > this.now()) {
+      this.documents.delete(url);
+      this.documents.set(url, cached);
+      return cached.record;
+    }
+    const pending = this.inFlight.get(url);
+    if (pending) return pending;
+    if (this.inFlight.size >= MAX_CONCURRENT_FETCHES) {
+      // Not cached: the URL may be fine, the server is only busy.
+      this.log.warn("client metadata document fetch refused: too many in flight", { url });
+      return null;
+    }
+    const fetching = this.loadDocument(url).finally(() => this.inFlight.delete(url));
+    this.inFlight.set(url, fetching);
+    return fetching;
+  }
+
+  private async loadDocument(url: string): Promise<OAuthClientRecord | null> {
     let record: OAuthClientRecord | null = null;
     try {
       const doc = await this.fetchDocument(url);
@@ -164,8 +188,12 @@ export class JamClientsStore implements OAuthRegisteredClientsStore {
       this.log.warn("client metadata document rejected", { url, ...errorFields(err), stack: undefined });
     }
     const ttl = record ? DOCUMENT_CACHE_MS : DOCUMENT_FAILURE_CACHE_MS;
-    if (this.documents.size > 500) this.documents.clear();
+    this.documents.delete(url);
     this.documents.set(url, { record, until: this.now() + ttl });
+    for (const oldest of this.documents.keys()) {
+      if (this.documents.size <= DOCUMENT_CACHE_SIZE) break;
+      this.documents.delete(oldest);
+    }
     return record;
   }
 }

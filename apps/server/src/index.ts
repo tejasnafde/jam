@@ -28,7 +28,7 @@ const app = createApp({
     return { uid: decoded.uid, email: decoded.email };
   },
   staticDir,
-  oauth: { publicUrl: config.PUBLIC_URL },
+  oauth: { publicUrl: config.PUBLIC_URL, edgeSecret: config.JAM_EDGE_SECRET ?? null },
   log,
 });
 
