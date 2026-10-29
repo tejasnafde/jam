@@ -1,0 +1,15 @@
+# Builds the prep worker image. CI runs:
+#   gcloud builds submit services/prep --config services/prep/cloudbuild.yaml --substitutions _TAG=<sha>
+steps:
+  - name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args: ["-c", "docker pull ${_IMAGE}:latest || true"]
+  - name: gcr.io/cloud-builders/docker
+    args: ["build", "--cache-from", "${_IMAGE}:latest", "-t", "${_IMAGE}:${_TAG}", "-t", "${_IMAGE}:latest", "."]
+images: ["${_IMAGE}:${_TAG}", "${_IMAGE}:latest"]
+substitutions:
+  _IMAGE: asia-south1-docker.pkg.dev/teejayproject/jam/prep
+  _TAG: manual
+options:
+  machineType: E2_HIGHCPU_8
+timeout: 2400s

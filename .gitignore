@@ -8,3 +8,4 @@ sa-*.json
 coverage
 .wrangler
 .switchboard/
+__pycache__/

@@ -1,0 +1,32 @@
+// Library API types on top of the shared samples contract (samples.ts, never edited).
+import { z } from "zod";
+import { CreateUploadUrl, Sample } from "./samples.js";
+
+export const SAMPLE_MAX_BYTES = 50 * 1024 * 1024;
+
+/** Signed into every upload URL and sent with the PUT, so GCS itself rejects a larger body. */
+export const UPLOAD_SIZE_HEADERS = { "x-goog-content-length-range": `0,${SAMPLE_MAX_BYTES}` } as const;
+
+export const SAMPLE_EXT = {
+  "audio/wav": "wav",
+  "audio/mpeg": "mp3",
+  "audio/webm": "webm",
+  "audio/ogg": "ogg",
+} as const satisfies Record<Sample["contentType"], string>;
+
+/** Object path in SAMPLE_BUCKET for a sample. */
+export const samplePath = (userId: string, id: string, contentType: Sample["contentType"]) =>
+  `users/${userId}/samples/${id}.${SAMPLE_EXT[contentType]}`;
+
+export const RegisterSample = Sample.omit({ userId: true, createdAt: true });
+export type RegisterSample = z.input<typeof RegisterSample>;
+
+export type CreateUploadUrlBody = z.input<typeof CreateUploadUrl>;
+
+export interface UploadUrlResponse {
+  id: string;
+  uploadUrl: string;
+  storagePath: string;
+}
+
+export type SampleWithUrl = Sample & { url: string };
