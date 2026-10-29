@@ -6,9 +6,11 @@ import type { PanelOverride } from "./App";
 import { AuthProvider } from "./features/auth/AuthProvider";
 import "./index.css";
 
+const params = new URLSearchParams(location.search);
+
 async function devPreview(): Promise<PanelOverride | undefined> {
-  if (!import.meta.env.DEV || !new URLSearchParams(location.search).has("preview")) return undefined;
-  return (await import("./preview")).PREVIEW_PANEL;
+  if (!import.meta.env.DEV || !params.has("preview")) return undefined;
+  return (await import("./preview")).previewPanel(params.get("preview"));
 }
 
 /**
@@ -17,8 +19,12 @@ async function devPreview(): Promise<PanelOverride | undefined> {
  */
 async function page(): Promise<ReactNode> {
   if (location.pathname === "/authorize") {
+    if (import.meta.env.DEV && params.has("preview")) {
+      const { ConsentPreview } = await import("./features/consent/preview");
+      return <ConsentPreview state={params.get("preview")} />;
+    }
     const { ConsentPage } = await import("./features/consent/ConsentPage");
-    return <ConsentPage requestId={new URLSearchParams(location.search).get("request") ?? ""} />;
+    return <ConsentPage requestId={params.get("request") ?? ""} />;
   }
   const [{ App }, panelOverride] = await Promise.all([import("./App"), devPreview()]);
   return <App panelOverride={panelOverride} />;

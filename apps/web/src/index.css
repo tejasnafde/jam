@@ -12,8 +12,12 @@
   --font-sans: "Space Grotesk Variable", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
   --color-oil: var(--oil);
+  --color-oil-deep: var(--oil-deep);
   --color-water: var(--water);
+  --color-water-deep: var(--water-deep);
   --color-gutter: var(--gutter);
+  --color-hairline: var(--hairline);
+  --color-well: var(--well);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -93,8 +97,13 @@
   --sidebar-border: #2c2838;
   --sidebar-ring: #3ccfc0;
   --oil: #ff8a3d;
+  --oil-deep: #c45e1c;
   --water: #3ccfc0;
+  --water-deep: #1f8a80;
   --gutter: #4d465e;
+  /* Tints and shades of the palette: a faint rule, and a darker "well" for meters and waveforms. */
+  --hairline: #26222f;
+  --well: #100e16;
 }
 
 /*
@@ -179,4 +188,49 @@ html.dark {
   100% {
     opacity: 0;
   }
+}
+
+/* A soft breath on the thing that is live: the Play button while playing, the current stage. */
+@keyframes jam-breathe {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(255 138 61 / 0.35);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgb(255 138 61 / 0);
+  }
+}
+@keyframes jam-wash {
+  0% {
+    background-position: 0% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+.jam-breathe {
+  animation: jam-breathe 2.4s ease-in-out infinite;
+}
+.jam-wash {
+  background-image: linear-gradient(90deg, var(--water-deep) 0%, var(--water) 45%, var(--water-deep) 100%);
+  background-size: 200% 100%;
+  animation: jam-wash 3.2s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .jam-breathe,
+  .jam-wash {
+    animation: none;
+  }
+}
+
+/* Keyboard hints in the top bar. */
+kbd.jam-kbd {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 5px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  color: var(--muted-foreground);
+  background: var(--well);
 }

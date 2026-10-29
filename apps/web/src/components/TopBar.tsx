@@ -18,16 +18,30 @@ interface Props {
 
 export function TopBar({ playing, onTogglePlay, panelOpen, onTogglePanel, status, tools, account }: Props) {
   return (
-    <header className="sticky top-0 z-10 flex h-14 flex-none items-center gap-3 border-b border-border bg-background px-3 md:gap-4 md:px-4">
-      <a href="/" className="flex items-center gap-2 text-[22px] font-bold tracking-tight" aria-label="jam home">
+    <header className="sticky top-0 z-10 flex h-14 flex-none items-center gap-3 border-b border-hairline bg-background px-3 md:gap-4 md:px-4">
+      <a
+        href="/"
+        className="flex items-center gap-2 rounded-md text-[22px] font-bold tracking-tight outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+        aria-label="jam home"
+      >
         <Logo className="size-7" />
         <span>jam</span>
       </a>
-      <PlayButton playing={playing} onToggle={onTogglePlay} />
-      <LevelMeter playing={playing} />
-      <span className="text-xs whitespace-nowrap text-muted-foreground max-xl:hidden">
-        Ctrl+Enter to play, Ctrl+. to stop
-      </span>
+      <div className="flex items-center gap-2">
+        <PlayButton playing={playing} onToggle={onTogglePlay} />
+        <LevelMeter playing={playing} />
+      </div>
+      <p className="flex items-center gap-1.5 text-xs text-muted-foreground max-xl:hidden" aria-label="Shortcuts">
+        <kbd className="jam-kbd">Ctrl</kbd>
+        <kbd className="jam-kbd">Enter</kbd>
+        <span>plays</span>
+        <span className="mx-1 text-gutter" aria-hidden="true">
+          /
+        </span>
+        <kbd className="jam-kbd">Ctrl</kbd>
+        <kbd className="jam-kbd">.</kbd>
+        <span>stops</span>
+      </p>
       <div className="flex-1" />
       {status}
       {tools}
