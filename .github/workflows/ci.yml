@@ -20,6 +20,9 @@ env:
   REGION: asia-south1
   SERVICE: jam
   RUNTIME_SA: jam-run@teejayproject.iam.gserviceaccount.com
+  PREP_JOB: jam-prep
+  PREP_SA: jam-prep@teejayproject.iam.gserviceaccount.com
+  PREP_IMAGE: asia-south1-docker.pkg.dev/teejayproject/jam/prep
 
 jobs:
   check:
@@ -36,6 +39,21 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+
+  prep-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/prep
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: services/prep/requirements-audio.txt
+      - run: pip install -r requirements-audio.txt
+      - run: python -m unittest -v test_prep
 
   deploy:
     needs: check
@@ -81,3 +99,60 @@ jobs:
           CODE=$(curl -s -o /dev/null -w "%{http_code}" -m 30 -X POST https://jam.tn07.dev/mcp -H 'Content-Type: application/json' -d '{}')
           echo "unauthenticated /mcp -> HTTP ${CODE}"
           [ "$CODE" = "401" ]
+
+  # Builds the prep worker image and points the Cloud Run job at it. It never
+  # runs the job; the server starts executions when a user asks for prep.
+  prep-image:
+    needs: [check, prep-test]
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/974343814740/locations/global/workloadIdentityPools/github-actions/providers/github
+          service_account: 974343814740-compute@developer.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      # The image tag is the last commit that touched services/prep. Build when the job
+      # runs any other tag, so a failed build or deploy is retried on the next push to main.
+      # A manual run (workflow_dispatch) always builds.
+      - name: Is the job on the newest services/prep?
+        id: changed
+        run: |
+          WANT=$(git log -1 --format=%H -- services/prep)
+          HAVE=$(gcloud run jobs describe "$PREP_JOB" --project="$PROJECT" --region="$REGION" \
+            --format='value(spec.template.spec.template.spec.containers[0].image)' 2>/dev/null || true)
+          echo "want ${PREP_IMAGE}:${WANT}, job has ${HAVE:-nothing}"
+          echo "tag=${WANT}" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "$HAVE" != "${PREP_IMAGE}:${WANT}" ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build the image (Cloud Build)
+        if: steps.changed.outputs.build == 'true'
+        run: |
+          gcloud builds submit services/prep \
+            --project="$PROJECT" \
+            --config=services/prep/cloudbuild.yaml \
+            --substitutions="_TAG=${{ steps.changed.outputs.tag }}"
+
+      - name: Update the job
+        if: steps.changed.outputs.build == 'true'
+        run: |
+          gcloud run jobs deploy "$PREP_JOB" \
+            --image="${PREP_IMAGE}:${{ steps.changed.outputs.tag }}" \
+            --project="$PROJECT" \
+            --region="$REGION" \
+            --service-account="$PREP_SA" \
+            --labels=app=jam \
+            --memory=8Gi --cpu=4 --task-timeout=30m --max-retries=0 --tasks=1 \
+            --set-env-vars="GOOGLE_CLOUD_PROJECT=${PROJECT},FIRESTORE_DATABASE=jam-db,SAMPLE_BUCKET=jam-samples-teejayproject" \
+            --quiet

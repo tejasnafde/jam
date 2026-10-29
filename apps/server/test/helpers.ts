@@ -2,7 +2,11 @@ import request from "supertest";
 import { expect } from "vitest";
 import { createApp, type AppDeps } from "../src/app.js";
 import { SoundIndex } from "../src/sounds/soundIndex.js";
+import { MemoryBlobs } from "../src/store/blobs.js";
+import type { PrepRun } from "../src/prep/runner.js";
 import { MemoryStore } from "../src/store/memory.js";
+import { MemoryPrepStore } from "../src/store/prep.js";
+import { MemorySampleStore } from "../src/store/samples.js";
 
 /** Fake Firebase: "id-<uid>" is a valid ID token for <uid>. */
 export const verifyIdToken = async (token: string) => {
@@ -31,16 +35,29 @@ export function testClock(start = Date.parse("2026-10-30T12:00:00Z")) {
 
 export function setup(overrides: Partial<Pick<AppDeps, "oauth" | "fetchDocument" | "staticDir">> = {}) {
   const store = new MemoryStore();
+  const samples = new MemorySampleStore();
+  const blobs = new MemoryBlobs();
+  const prep = new MemoryPrepStore();
+  /** Every prep run the app started. Set runner.fail to make the runner throw. */
+  const runs: PrepRun[] = [];
+  const runner = { fail: false };
+  const run = async (r: PrepRun) => {
+    if (runner.fail) throw new Error("Cloud Run said no");
+    runs.push(r);
+  };
   const clock = testClock();
   const app = createApp({
     store,
+    samples,
+    blobs,
     sounds: new SoundIndex(fakeFetcher),
     verifyIdToken,
+    prep: { store: prep, run },
     fetchDocument: overrides.fetchDocument,
     staticDir: overrides.staticDir,
     oauth: { rateLimits: false, now: clock.now, ...overrides.oauth },
   });
-  return { store, app, clock, ...clients(app) };
+  return { store, samples, blobs, prep, runs, runner, app, clock, ...clients(app) };
 }
 
 const ACCEPT = "application/json, text/event-stream";

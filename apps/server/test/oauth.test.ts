@@ -958,3 +958,21 @@ describe("SSRF guard: IPv6 ranges that embed IPv4", () => {
     for (const ip of ["8.8.8.8", "2606:4700:4700::1111"]) expect(isPublicAddress(ip), ip).toBe(true);
   });
 });
+
+describe("phase 3 features with OAuth", () => {
+  it("serves the sample and prep tools to an OAuth token, but not the page API", async () => {
+    const ctx = setup();
+    const { tokens } = await connect(ctx);
+    const res = await listTools(ctx.app, tokens.access_token);
+    expect(res.status).toBe(200);
+    const names = (res.body.result.tools as { name: string }[]).map((t) => t.name);
+    expect(names).toEqual(expect.arrayContaining(["list_samples", "get_sample", "get_prep_status"]));
+    const listed = await ctx.callTool(tokens.access_token, "list_samples");
+    expect(listed.isError).toBeFalsy();
+    for (const path of ["/api/samples", "/api/prep/x"]) {
+      await request(ctx.app).get(path).set("Authorization", `Bearer ${tokens.access_token}`).expect(401);
+    }
+    const personal = await ctx.mintFor("alice");
+    expect((await ctx.callTool(personal, "list_samples")).isError).toBeFalsy();
+  });
+});

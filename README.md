@@ -49,8 +49,11 @@ in the URL.
 | `get_audio_snapshot` | read       | Loudness and low/mid/high energy measured after each evaluation                     |
 | `lookup_sound`       | read       | Search Strudel's default sounds: synths, `gm_*` soundfonts, sample banks, drum kits |
 | `get_session_plan`   | read       | The current plan and stage                                                          |
+| `list_samples`       | read       | The user's sample library: kind, duration, BPM, key, stats, stems and ops           |
+| `get_sample`         | read       | One sample by name, with its stems and prepared versions                            |
 | `set_session_plan`   | plan write | Start a new plan (destination plus 4 to 6 stages)                                   |
 | `set_stage`          | plan write | Move to a stage, with an optional short note                                        |
+| `get_prep_status`    | read       | The user's prep jobs (stem split, tempo match, key shift) and the samples they made |
 
 Prompt: `start_session` (optional `mood`, `minutes`). The coaching rules are also in the server instructions, so a
 client that does not use prompts still gets them.
@@ -70,14 +73,20 @@ apps/
   web/             React + Vite + Tailwind + shadcn/ui
     src/components/ui/   shadcn components
     src/components/      App shell: top bar, side panel, level meter
-    src/features/        auth, editor (wraps <strudel-editor>), plan, connect, consent (OAuth page)
+    src/features/        auth, editor (wraps <strudel-editor>), plan, connect, consent (OAuth page), library
     src/lib/             Firebase client, typed API client, audio analyser tap
 packages/
   shared/          zod schemas and types used by both apps
+services/
+  prep/            Python Cloud Run job: Demucs stem split, BPM and key detection, Rubber Band
+                   tempo and pitch. One execution per prep job; the server starts it, it writes
+                   its status to Firestore users/{uid}/prep_jobs/{id}
 edge/              Cloudflare Worker that maps jam.tn07.dev to Cloud Run
 ```
 
-Storage is Firestore (named database `jam-db` in `teejayproject`). No state lives in server memory, so Cloud Run can
+Storage is Firestore (named database `jam-db` in `teejayproject`). Sample audio lives in the private bucket
+`jam-samples-teejayproject` under `users/{uid}/`; the page uploads and plays it through short-lived signed URLs, and
+registers each sample with Strudel so `s("name")` plays it. No state lives in server memory, so Cloud Run can
 run several instances.
 
 MCP auth is a list of authenticators: the personal key (`jam_...`), then the OAuth access token (`jama_...`). `/mcp`
@@ -152,6 +161,9 @@ The server uses Application Default Credentials for Firestore. Point `GOOGLE_APP
 account key that can use the `jam-db` database. `http://localhost:5173/?preview` shows the side panel with fixture data
 and needs no backend.
 
+Sample uploads and playback go straight to the bucket, and its CORS allows only `localhost:5173` (dev) and
+`localhost:4173` (preview). GCS CORS has no port wildcard, so on another port add the origin to the bucket CORS.
+
 Checks, the same as CI:
 
 ```sh
@@ -165,7 +177,8 @@ npm run build
 ## Deploy
 
 A push to `main` runs the checks, then deploys to Cloud Run (`.github/workflows/ci.yml`). There is no other deploy
-path. The edge Worker is deployed by hand with `cd edge && npx wrangler deploy`; it only changes if the Cloud Run URL
+path. When `services/prep` changes, CI also builds the prep image with Cloud Build and updates the `jam-prep` Cloud
+Run job (it never runs it). The edge Worker is deployed by hand with `cd edge && npx wrangler deploy`; it only changes if the Cloud Run URL
 does.
 
 ## License

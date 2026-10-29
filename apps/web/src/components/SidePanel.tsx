@@ -1,10 +1,12 @@
-import type { GrantInfo, SessionPlan, TokenInfo } from "@jam/shared";
+import type { GrantInfo, SampleWithUrl, SessionPlan, TokenInfo } from "@jam/shared";
 import { useState } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { AccountSection } from "@/features/auth/AccountSection";
 import type { Profile } from "@/features/auth/authContext";
 import { ConnectSection } from "@/features/connect/ConnectSection";
+import { LibrarySection } from "@/features/library/LibrarySection";
 import { PlanSection } from "@/features/plan/PlanSection";
+import type { PrepHandle } from "@/features/prep/usePrep";
 import { PanelCard } from "./PanelCard";
 
 export interface SidePanelProps {
@@ -19,6 +21,11 @@ export interface SidePanelProps {
   onCreateToken: (label: string) => void;
   onRevokeToken: (id: string) => void;
   onRevokeGrant: (id: string) => void;
+  samples: SampleWithUrl[];
+  uploadingSample: boolean;
+  onUploadSample: (file: File) => void;
+  onDeleteSample: (id: string) => void;
+  prep?: PrepHandle;
 }
 
 export function SidePanel(props: SidePanelProps) {
@@ -36,6 +43,16 @@ export function SidePanel(props: SidePanelProps) {
         <div className="flex min-h-full flex-col gap-4 p-3 md:p-4">
           <PanelCard title="Today we paint" coach>
             <PlanSection plan={plan} signedIn={!!profile} />
+          </PanelCard>
+          <PanelCard title="Library">
+            <LibrarySection
+              signedIn={!!profile}
+              samples={props.samples}
+              uploading={props.uploadingSample}
+              onUpload={props.onUploadSample}
+              onDelete={props.onDeleteSample}
+              prep={props.prep}
+            />
           </PanelCard>
           <PanelCard title="Connect an assistant" coach open={connectOpen} onOpenChange={setConnectOpen}>
             <ConnectSection

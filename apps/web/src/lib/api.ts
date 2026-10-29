@@ -5,6 +5,8 @@ import type {
   GrantInfo,
   CreateTokenRequest,
   CreateTokenResponse,
+  PrepRequestBody,
+  PrepStatusResponse,
   SaveAudioRequest,
   SaveVersionResponse,
   SessionPlan,
@@ -50,6 +52,8 @@ export function createApi(getIdToken: GetIdToken, base = "/api") {
   const post = <T>(path: string, body: unknown) => call<T>(path, { method: "POST", body: JSON.stringify(body) });
 
   return {
+    /** The raw authenticated call, for feature clients such as samples-api. */
+    request: call,
     saveVersion: (code: string) => post<SaveVersionResponse>("/versions", { code }),
     latestVersion: () => call<CodeVersion | null>("/versions/latest"),
     saveAudio: (snapshot: SaveAudioRequest) => post<{ id: string }>("/audio", snapshot),
@@ -61,6 +65,8 @@ export function createApi(getIdToken: GetIdToken, base = "/api") {
     revokeGrant: (id: string) => call<null>(`/oauth/grants/${encodeURIComponent(id)}`, { method: "DELETE" }),
     decideConsent: (id: string, allow: boolean) =>
       post<ConsentDecisionResponse>(`/oauth/requests/${encodeURIComponent(id)}/decision`, { allow }),
+    startPrep: (body: PrepRequestBody) => post<{ jobId: string }>("/prep", body),
+    prepStatus: (jobId: string) => call<PrepStatusResponse>(`/prep/${encodeURIComponent(jobId)}`),
   };
 }
 
