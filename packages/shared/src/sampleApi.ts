@@ -1,6 +1,6 @@
 // Library API types on top of the shared samples contract (samples.ts, never edited).
 import { z } from "zod";
-import { Sample } from "./samples.js";
+import { CreateUploadUrl, Sample } from "./samples.js";
 
 export const SAMPLE_MAX_BYTES = 50 * 1024 * 1024;
 
@@ -17,6 +17,8 @@ export const samplePath = (userId: string, id: string, contentType: Sample["cont
 
 export const RegisterSample = Sample.omit({ userId: true, createdAt: true });
 export type RegisterSample = z.input<typeof RegisterSample>;
+
+export type CreateUploadUrlBody = z.input<typeof CreateUploadUrl>;
 
 export interface UploadUrlResponse {
   id: string;

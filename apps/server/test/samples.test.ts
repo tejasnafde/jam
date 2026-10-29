@@ -117,7 +117,13 @@ describe("samples API", () => {
 describe("MemorySampleStore", () => {
   it("scopes by user and keeps names unique per user", async () => {
     const store = new MemorySampleStore();
-    const base = { kind: "take", storagePath: "p", contentType: "audio/wav", durationSec: 1, ops: [] } as const;
+    const base: Pick<Sample, "kind" | "storagePath" | "contentType" | "durationSec" | "ops"> = {
+      kind: "take",
+      storagePath: "p",
+      contentType: "audio/wav",
+      durationSec: 1,
+      ops: [],
+    };
     await store.create({ ...base, id: "a", userId: "u1", name: "kick", createdAt: "2026-01-01" });
     await store.create({ ...base, id: "b", userId: "u2", name: "kick", createdAt: "2026-01-01" });
     await store.create({ ...base, id: "c", userId: "u1", name: "snare", createdAt: "2026-01-02" });
