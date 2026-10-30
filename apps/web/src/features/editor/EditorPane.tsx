@@ -54,7 +54,8 @@ export function EditorPane({
   const playing = useRef(false);
   const liveRef = useRef(live);
   const lastCode = useRef<string | null>(null);
-  const reverting = useRef(false);
+  // The code a Live revert put back, until its evaluation reports.
+  const reverting = useRef<string | null>(null);
 
   // Code waiting for the editor to load (a session opened before Strudel was ready).
   const pending = useRef<string | null>(null);
@@ -76,7 +77,7 @@ export function EditorPane({
     const controller = new LiveController({
       evaluate: (code) => void editorRef.current?.evaluateQuiet(code),
       revert: (code) => {
-        reverting.current = true;
+        reverting.current = code;
         void editorRef.current?.evaluateQuiet(code);
       },
     });
@@ -88,8 +89,12 @@ export function EditorPane({
     };
   }, [editorRef]);
   useEffect(() => {
-    if (!live) liveMode.current?.controller.cancel();
-  }, [live]);
+    const controller = liveMode.current?.controller;
+    if (!live) return controller?.cancel();
+    // Edits made before Live was switched on count too: the music catches up after the usual pause.
+    const code = editorRef.current?.getCode();
+    if (code && playing.current) controller?.onEdit(code, { enabled: true, playing: true });
+  }, [live, editorRef]);
 
   useEffect(() => {
     if (!controlRef) return;
@@ -130,6 +135,7 @@ export function EditorPane({
       // The editor's own text: a Live revert evaluates older code without changing what the user wrote.
       const code = editorRef.current?.getCode() ?? s.code;
       const controller = liveMode.current?.controller;
+      controller?.onPlayingChange(s.started);
       if (code && code !== "// LOADING") {
         localStorage.setItem(LOCAL_CODE_KEY, code);
         // The first text seen is what the editor loaded with, not an edit.
@@ -148,8 +154,8 @@ export function EditorPane({
   );
 
   const onEvaluated = useCallback((s: StrudelState) => {
-    if (reverting.current) {
-      reverting.current = false;
+    if (reverting.current !== null && s.activeCode === reverting.current) {
+      reverting.current = null;
       return;
     }
     const mode = liveMode.current;

@@ -45,16 +45,19 @@ export function useSoundCatalog(yours: readonly string[]) {
         })
         .catch(() => live && setSource("none"));
 
-    if (attach()) return () => void unlisten?.();
     let fellBack = false;
-    const timer = setInterval(() => {
-      if (attach()) return clearInterval(timer);
-      if (!fellBack && Date.now() - started > FALLBACK_AFTER_MS) {
-        fellBack = true;
-        // Keep polling: if Strudel loads late, its map replaces the fallback.
-        void fallback();
-      }
-    }, POLL_MS);
+    let timer: ReturnType<typeof setInterval> | undefined;
+    if (!attach()) {
+      timer = setInterval(() => {
+        if (attach()) return clearInterval(timer);
+        if (!fellBack && Date.now() - started > FALLBACK_AFTER_MS) {
+          fellBack = true;
+          // Keep polling: if Strudel loads late, its map replaces the fallback.
+          void fallback();
+        }
+      }, POLL_MS);
+    }
+    // One cleanup for both paths: a settle timer must not set state after unmount.
     return () => {
       live = false;
       clearInterval(timer);
