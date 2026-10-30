@@ -6,12 +6,16 @@ export const registerGetCurrentCode: ToolRegistrar = (server, { uid, store }) =>
     "get_current_code",
     {
       title: "Get current code",
-      description: "The Strudel code the user last evaluated (Ctrl+Enter), with when it ran and how often.",
+      description:
+        "The Strudel code the user last evaluated (Ctrl+Enter) in the session they have open, with the session name, when it ran and how often.",
       annotations: READ_ONLY,
     },
     async () => {
-      const version = await store.latestVersion(uid);
-      return version ? jsonResult(version) : textResult("The user has not evaluated any code yet.");
+      const session = await store.currentSession(uid);
+      const version = await store.latestVersion(uid, session.id);
+      if (!version) return textResult(`The user has not evaluated any code yet in the session "${session.name}".`);
+      const { sessionId: _sessionId, ...rest } = version;
+      return jsonResult({ session: session.name, ...rest });
     },
   );
 };
