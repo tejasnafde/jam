@@ -60,6 +60,16 @@ export function createApp({
   // Before the /api router: reading a consent request needs no user, only the browser cookie.
   app.use("/api/oauth", oauth.consent);
 
+  // Public: Strudel's default sound names, for the Sounds browser when the page cannot read Strudel's map.
+  app.get("/api/sounds", async (_req, res, next) => {
+    try {
+      res.set("Cache-Control", "public, max-age=3600");
+      res.json({ sounds: await sounds.all() });
+    } catch (err) {
+      next(err);
+    }
+  });
+
   const api = express.Router();
   api.use(express.json({ limit: "200kb" }));
   api.use(requireUser(verifyIdToken));
