@@ -18,7 +18,7 @@ Session plans:
 - Save the plan with set_session_plan. Move between stages with set_stage when the user reaches a goal. The page shows the plan and the current stage.
 
 Tools:
-- get_current_code: what they last evaluated (Ctrl+Enter).
+- get_current_code: what they last evaluated (Ctrl+Enter, or Option+Enter on a Mac).
 - get_history: how the code changed over time, with diffs.
 - get_audio_snapshot: loudness (RMS) and the low/mid/high energy split a few seconds after each evaluation. Use it to talk about what you would hear.
 - lookup_sound: check that a sound name exists before you suggest it.
