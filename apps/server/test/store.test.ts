@@ -8,7 +8,7 @@ describe("MemoryStore", () => {
     await store.saveVersion("u", "a");
     await store.saveVersion("u", "b");
     const bumped = await store.saveVersion("u", "b");
-    expect(bumped.evalCount).toBe(2);
+    expect(bumped?.evalCount).toBe(2);
     expect((await store.listVersions("u", 10)).map((v) => v.code)).toEqual(["b", "a"]);
     expect((await store.latestVersion("u"))?.code).toBe("b");
     expect(await store.latestVersion("nobody")).toBeNull();

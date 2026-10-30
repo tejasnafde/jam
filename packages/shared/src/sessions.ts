@@ -64,7 +64,7 @@ export const VERSION_PAGE_MAX = 50;
 export const versionPageQuerySchema = z.object({
   /** createdAt of the oldest version already shown. */
   before: z.string().max(40).optional(),
-  limit: z.coerce.number().int().min(1).max(VERSION_PAGE_MAX).default(20),
+  limit: z.coerce.number().int().min(1).max(VERSION_PAGE_MAX).default(10),
 });
 
 export const versionEntrySchema = z.object({

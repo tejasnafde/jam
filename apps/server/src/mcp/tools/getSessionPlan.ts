@@ -6,7 +6,8 @@ export const registerGetSessionPlan: ToolRegistrar = (server, { uid, store }) =>
     "get_session_plan",
     {
       title: "Get session plan",
-      description: "The plan of the session the user has open: destination, stages and the current stage index (0-based).",
+      description:
+        "The plan of the session the user has open: destination, stages and the current stage index (0-based).",
       annotations: READ_ONLY,
     },
     async () => {

@@ -48,7 +48,9 @@ export class MemoryStore implements Store {
   }
 
   async saveVersion(uid: string, code: string, opts: { email?: string; sessionId?: string } = {}) {
-    const session = opts.sessionId ? this.find(uid, opts.sessionId) : this.find(uid, (await this.currentSession(uid)).id);
+    const session = opts.sessionId
+      ? this.find(uid, opts.sessionId)
+      : this.find(uid, (await this.currentSession(uid)).id);
     if (!session) return null;
     const list = this.versions.get(uid) ?? [];
     const top = list.find((v) => v.sessionId === session.id);
@@ -164,7 +166,14 @@ export class MemoryStore implements Store {
 
   async createSession(uid: string, input: { name: string; lastCode: string }) {
     const ts = this.nextTime();
-    const session: Session = { id: this.nextId(), ...input, createdAt: ts, updatedAt: ts, versionCount: 0, planId: null };
+    const session: Session = {
+      id: this.nextId(),
+      ...input,
+      createdAt: ts,
+      updatedAt: ts,
+      versionCount: 0,
+      planId: null,
+    };
     this.sessions.set(uid, [session, ...(this.sessions.get(uid) ?? [])]);
     this.current.set(uid, session.id);
     return { ...session };
@@ -198,7 +207,10 @@ export class MemoryStore implements Store {
     const plan = await this.currentPlan(uid, source.id);
     if (plan) {
       const saved = await this.savePlan(uid, { destination: plan.destination, stages: plan.stages }, copy.id);
-      await this.updatePlan(uid, saved.id, { currentStage: plan.currentStage, ...(plan.note ? { note: plan.note } : {}) });
+      await this.updatePlan(uid, saved.id, {
+        currentStage: plan.currentStage,
+        ...(plan.note ? { note: plan.note } : {}),
+      });
     }
     return { ...(this.find(uid, copy.id) as Session) };
   }
