@@ -6,7 +6,8 @@ export const registerGetCurrentCode: ToolRegistrar = (server, { uid, store }) =>
     "get_current_code",
     {
       title: "Get current code",
-      description: "The Strudel code the user last evaluated (Ctrl+Enter), with when it ran and how often.",
+      description:
+        "The Strudel code the user last evaluated (Ctrl+Enter, or Option+Enter on a Mac), with when it ran and how often.",
       annotations: READ_ONLY,
     },
     async () => {

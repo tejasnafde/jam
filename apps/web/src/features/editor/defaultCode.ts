@@ -1,4 +1,8 @@
-export const DEFAULT_CODE = `// Welcome to jam. Ctrl+Enter plays, Ctrl+. stops.
+// Strudel binds both Ctrl and Alt. On a Mac, Ctrl+Enter opens the context menu, so show Option there.
+export const PLAY_KEY =
+  typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.userAgent) ? "Option" : "Ctrl";
+
+export const DEFAULT_CODE = `// Welcome to jam. ${PLAY_KEY}+Enter plays, ${PLAY_KEY}+. stops.
 // Your coach can read this, but only your hands can change it.
 setcpm(90/4)
 
