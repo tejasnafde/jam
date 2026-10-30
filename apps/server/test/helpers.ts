@@ -56,6 +56,8 @@ export function setup(overrides: Partial<Pick<AppDeps, "oauth" | "fetchDocument"
     fetchDocument: overrides.fetchDocument,
     staticDir: overrides.staticDir,
     oauth: { rateLimits: false, now: clock.now, ...overrides.oauth },
+    now: clock.now,
+    coachPollMs: 20,
   });
   return { store, samples, blobs, prep, runs, runner, app, clock, ...clients(app) };
 }

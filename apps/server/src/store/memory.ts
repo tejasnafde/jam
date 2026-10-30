@@ -1,7 +1,13 @@
+import { EventEmitter } from "node:events";
 import {
+  advanceCadence,
+  DEFAULT_CADENCE_STATE,
   UNTITLED_SESSION_ID,
   UNTITLED_SESSION_NAME,
   type AudioSnapshot,
+  type CoachCadence,
+  type CoachCadenceState,
+  type CoachEvent,
   type CodeVersion,
   type PlanInput,
   type Session,
@@ -38,6 +44,12 @@ export class MemoryStore implements Store {
   readonly oauthTokens = new Map<string, OAuthTokenRecord>();
   /** Registered clients that no grant has claimed yet (Firestore: `expireAt` is set). */
   readonly unclaimedClients = new Set<string>();
+  /** Coach events per user, oldest first. */
+  readonly coachEvents = new Map<string, CoachEvent[]>();
+  /** Cadence state per `${uid}/${sessionId}`. */
+  readonly cadences = new Map<string, CoachCadenceState>();
+  readonly listening = new Map<string, string>();
+  private readonly coachChanges = new EventEmitter();
   private seq = 0;
 
   private nextId() {
@@ -241,8 +253,88 @@ export class MemoryStore implements Store {
       uid,
       (this.plans.get(uid) ?? []).filter((p) => p.sessionId !== id),
     );
+    this.coachEvents.set(
+      uid,
+      (this.coachEvents.get(uid) ?? []).filter((e) => e.sessionId !== id),
+    );
+    this.cadences.delete(`${uid}/${id}`);
     if (this.current.get(uid) === id) this.current.delete(uid);
     return true;
+  }
+
+  async coachThread(uid: string, sessionId: string, limit: number) {
+    if (!this.find(uid, sessionId)) return null;
+    const events = (this.coachEvents.get(uid) ?? []).filter((e) => e.sessionId === sessionId);
+    return {
+      events: events.slice(-limit).map((e) => ({ ...e })),
+      cadence: (this.cadences.get(`${uid}/${sessionId}`) ?? DEFAULT_CADENCE_STATE).cadence,
+      listeningAt: this.listening.get(uid) ?? null,
+    };
+  }
+
+  private pushCoachEvent(uid: string, event: Omit<CoachEvent, "id">): CoachEvent {
+    const saved = { ...event, id: this.nextId() };
+    this.coachEvents.set(uid, [...(this.coachEvents.get(uid) ?? []), saved]);
+    this.coachChanges.emit(`${uid}/${event.sessionId}`);
+    return { ...saved };
+  }
+
+  async addCoachEvent(uid: string, sessionId: string, event: { kind: "ask" | "note"; text: string }, at: number) {
+    if (!this.find(uid, sessionId)) return null;
+    return this.pushCoachEvent(uid, {
+      ...event,
+      sessionId,
+      createdAt: new Date(at).toISOString(),
+      status: event.kind === "ask" ? "pending" : null,
+    });
+  }
+
+  async setCoachCadence(uid: string, sessionId: string, cadence: CoachCadence) {
+    if (!this.find(uid, sessionId)) return false;
+    this.cadences.set(`${uid}/${sessionId}`, { ...DEFAULT_CADENCE_STATE, cadence });
+    return true;
+  }
+
+  async tickCoach(uid: string, sessionId: string, at: number, run: boolean) {
+    if (!this.find(uid, sessionId)) return null;
+    const key = `${uid}/${sessionId}`;
+    const { state, due } = advanceCadence(this.cadences.get(key) ?? DEFAULT_CADENCE_STATE, at, run);
+    this.cadences.set(key, state);
+    if (!due) return null;
+    const pending = (this.coachEvents.get(uid) ?? []).some(
+      (e) => e.sessionId === sessionId && e.kind === "checkin" && e.status === "pending",
+    );
+    if (pending) return null;
+    return this.pushCoachEvent(uid, {
+      sessionId,
+      kind: "checkin",
+      text: "",
+      reason: due,
+      createdAt: new Date(at).toISOString(),
+      status: "pending",
+    });
+  }
+
+  async takeCoachEvent(uid: string, sessionId: string, at: number) {
+    const next = (this.coachEvents.get(uid) ?? []).find((e) => e.sessionId === sessionId && e.status === "pending");
+    if (!next) return null;
+    Object.assign(next, { status: "taken", takenAt: new Date(at).toISOString() });
+    return { ...next };
+  }
+
+  async touchCoachListening(uid: string, at: number) {
+    this.listening.set(uid, new Date(at).toISOString());
+  }
+
+  /** Open watchers, for tests that check wait_for_change cleans up. */
+  coachWatchers() {
+    return this.coachChanges.eventNames().reduce((n, name) => n + this.coachChanges.listenerCount(name), 0);
+  }
+
+  watchCoachEvents(uid: string, sessionId: string, onChange: () => void) {
+    const name = `${uid}/${sessionId}`;
+    this.coachChanges.on(name, onChange);
+    return () => void this.coachChanges.off(name, onChange);
   }
 
   async createToken(hash: string, uid: string, label: string) {

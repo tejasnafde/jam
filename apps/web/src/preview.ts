@@ -1,5 +1,6 @@
 // Fixture data for the dev-only ?preview mode (layout screenshots). Never bundled in production.
-import type { SampleWithUrl, Session, VersionEntry } from "@jam/shared";
+import type { CoachEvent, CoachThread, SampleWithUrl, Session, VersionEntry } from "@jam/shared";
+import type { CoachHandle } from "./features/coach/useCoach";
 import type { SessionsHandle } from "./features/sessions/useSessions";
 import type { PanelOverride } from "./App";
 
@@ -55,8 +56,62 @@ export const PREVIEW_SESSIONS: SessionsHandle = {
   },
 };
 
-/** ?preview=empty: signed in, nothing made yet. ?preview (or ?preview=active): a session in progress. */
+const event = (
+  id: string,
+  kind: CoachEvent["kind"],
+  text: string,
+  minutes: number,
+  extra: Partial<CoachEvent> = {},
+): CoachEvent => ({
+  id,
+  sessionId: "s1",
+  kind,
+  text,
+  createdAt: ago(minutes),
+  status: kind === "note" ? null : "taken",
+  ...extra,
+});
+
+const THREAD: CoachEvent[] = [
+  event("c1", "ask", "", 26),
+  event(
+    "c2",
+    "note",
+    "What a lovely lazy kick. The snare sits right on the beat, though. What happens if it leans back a little?",
+    25,
+  ),
+  event("c3", "checkin", "", 14, { reason: "runs" }),
+  event(
+    "c4",
+    "note",
+    "That swing on the hats was a happy accident. Keep it. Can you hear room for some rain up high?",
+    14,
+  ),
+  event("c5", "ask", "Why does the bass disappear on my laptop speakers?", 2),
+  event(
+    "c6",
+    "note",
+    "Small speakers drop the very low end. Try lifting the bass an octave, or give it a little `.shape`. Which do you like better?",
+    1,
+  ),
+];
+
+/** A coach thread fixture. The handle keeps asks in memory, so the preview responds. */
+function previewCoach(events: CoachEvent[], listening: boolean): CoachHandle {
+  const thread: CoachThread = {
+    events,
+    cadence: "runs15",
+    listeningAt: listening ? new Date().toISOString() : null,
+  };
+  return { thread, ask: noop, setCadence: noop };
+}
+
+/**
+ * ?preview=empty: signed in, nothing made yet. ?preview (or ?preview=active): a session in
+ * progress with a live coach. ?preview=thread: the same thread, no coach connected.
+ */
 export function previewPanel(state: string | null): PanelOverride {
+  if (state === "thread") return { ...PREVIEW_PANEL, coach: previewCoach(THREAD, false) };
   if (state !== "empty") return PREVIEW_PANEL;
   return {
     ...PREVIEW_PANEL,
@@ -67,6 +122,7 @@ export function previewPanel(state: string | null): PanelOverride {
     samples: [],
     prep: { jobs: {}, start: async () => {} },
     sessions: { ...PREVIEW_SESSIONS, sessions: [PREVIEW_SESSIONS.sessions[2] as Session], currentId: "untitled" },
+    coach: { thread: { events: [], cadence: "ask", listeningAt: null }, ask: noop, setCadence: noop },
   };
 }
 
@@ -107,6 +163,7 @@ export const PREVIEW_PANEL: PanelOverride = {
     sample("s3", "nightdrive_vocals", "stem", 212.6, { bpm: 92, key: "A minor", stem: "vocals", parentId: "s2" }),
   ],
   sessions: PREVIEW_SESSIONS,
+  coach: previewCoach(THREAD, true),
   uploadingSample: false,
   onUploadSample: () => {},
   onDeleteSample: () => {},

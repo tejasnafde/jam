@@ -1,5 +1,8 @@
 import type {
   AudioReading,
+  CoachCadence,
+  CoachEvent,
+  CoachThread,
   AudioSnapshot,
   CodeVersion,
   PlanInput,
@@ -97,11 +100,40 @@ export type NewAudioSnapshot = AudioReading & { versionId: string | null; window
 export type SessionPatch = Partial<Pick<Session, "name" | "lastCode">>;
 export type PlanPatch = Partial<Pick<SessionPlan, "currentStage" | "note">>;
 
+/** The coach thread of a session (users/{uid}/sessions/{id}/coachEvents in Firestore). */
+export interface CoachStore {
+  /** The newest `limit` events, oldest first, with the cadence and the listening heartbeat. Null when the session does not exist. */
+  coachThread(uid: string, sessionId: string, limit: number): Promise<CoachThread | null>;
+  /** Adds an ask (pending, for a coach to take) or a coach note. Null when the session does not exist. */
+  addCoachEvent(
+    uid: string,
+    sessionId: string,
+    event: { kind: "ask" | "note"; text: string },
+    at: number,
+  ): Promise<CoachEvent | null>;
+  /** Sets the cadence and starts counting again. False when the session does not exist. */
+  setCoachCadence(uid: string, sessionId: string, cadence: CoachCadence): Promise<boolean>;
+  /**
+   * Moves the session's cadence on: by one run (run: true), or only by the clock. Adds a pending
+   * check-in when one is due and none is pending already. Returns the check-in it added, or null.
+   */
+  tickCoach(uid: string, sessionId: string, at: number, run: boolean): Promise<CoachEvent | null>;
+  /** Atomically marks the oldest pending ask or check-in of the session taken, and returns it. */
+  takeCoachEvent(uid: string, sessionId: string, at: number): Promise<CoachEvent | null>;
+  /** Records that a coach is waiting for this user's events now. */
+  touchCoachListening(uid: string, at: number): Promise<void>;
+  /**
+   * Calls onChange when the session's thread may have a new pending event. Returns the stop
+   * function. A spurious call is fine: the waiter checks again.
+   */
+  watchCoachEvents(uid: string, sessionId: string, onChange: () => void): () => void;
+}
+
 /**
  * All persistent state. Cloud Run may run several instances, so nothing is
  * kept in process memory in production.
  */
-export interface Store extends OAuthStore {
+export interface Store extends OAuthStore, CoachStore {
   /**
    * Saves an evaluation in a session (the current one when sessionId is left out) and
    * makes it the session's lastCode. A good evaluation clears the session's lastError. Identical code to the session's latest version bumps

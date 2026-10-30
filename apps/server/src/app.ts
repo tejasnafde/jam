@@ -33,6 +33,10 @@ export interface AppDeps {
   fetchDocument?: DocumentFetcher;
   staticDir?: string;
   log?: Logger;
+  /** The clock for the coach cadence and wait_for_change. Tests move it by hand. */
+  now?: () => number;
+  /** How long wait_for_change sleeps between checks when nothing signals a change. */
+  coachPollMs?: number;
 }
 
 export function createApp({
@@ -46,6 +50,8 @@ export function createApp({
   fetchDocument,
   staticDir,
   log = silentLogger,
+  now = Date.now,
+  coachPollMs,
 }: AppDeps) {
   const app = express();
   app.disable("x-powered-by");
@@ -74,10 +80,10 @@ export function createApp({
   const api = express.Router();
   api.use(express.json({ limit: "200kb" }));
   api.use(requireUser(verifyIdToken));
-  api.use("/versions", versionsRouter(store));
+  api.use("/versions", versionsRouter(store, log, now));
   api.use("/audio", audioRouter(store));
   api.use("/plan", planRouter(store));
-  api.use("/sessions", sessionsRouter(store));
+  api.use("/sessions", sessionsRouter(store, now));
   api.use("/tokens", tokensRouter(store, log));
   api.use("/samples", samplesRouter(samples, blobs, log));
   api.use("/prep", prepRouter(samples, prep.store, prep.run, log));
@@ -85,7 +91,19 @@ export function createApp({
 
   const authenticators = [personalTokenAuthenticator(store, log), oauth.authenticator];
   const challenge = { resourceMetadataUrl: oauth.settings.resourceMetadataUrl, scope: oauth.settings.scope };
-  app.use("/mcp", mcpRouter({ store, samples, sounds, prep: prep.store, authenticators, challenge, log }));
+  app.use(
+    "/mcp",
+    mcpRouter({
+      store,
+      samples,
+      sounds,
+      prep: prep.store,
+      authenticators,
+      challenge,
+      log,
+      coach: { now, pollMs: coachPollMs },
+    }),
+  );
 
   if (staticDir) app.use(staticRouter(staticDir));
 

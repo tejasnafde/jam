@@ -11,6 +11,13 @@ export interface ToolContext {
   samples: SampleStore;
   sounds: SoundIndex;
   prep: PrepStore;
+  /** The clock, and how long wait_for_change sleeps between checks. */
+  coach: CoachClock;
+}
+
+export interface CoachClock {
+  now: () => number;
+  pollMs: number;
 }
 
 export type ToolRegistrar = (server: McpServer, ctx: ToolContext) => void;
@@ -25,6 +32,14 @@ export const READ_ONLY = {
 
 /** The plan tools: the only writes the coach can make. */
 export const PLAN_WRITE = {
+  readOnlyHint: false,
+  destructiveHint: false,
+  idempotentHint: false,
+  openWorldHint: false,
+} as const;
+
+/** The coach thread tools: they write coach text and bookkeeping, never the user's music. */
+export const COACH_WRITE = {
   readOnlyHint: false,
   destructiveHint: false,
   idempotentHint: false,

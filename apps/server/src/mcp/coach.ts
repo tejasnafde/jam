@@ -23,7 +23,17 @@ Tools:
 - list_sessions: the user's named pieces, with version counts and when each was last edited.
 - get_audio_snapshot: loudness (RMS) and the low/mid/high energy split a few seconds after each evaluation. Use it to talk about what you would hear.
 - lookup_sound: check that a sound name exists before you suggest it.
-- get_session_plan, set_session_plan, set_stage: the plan. These are the only things you can write.`;
+- get_session_plan, set_session_plan, set_stage: the plan.
+- wait_for_change: waits for the user's next ask on the page, a "Check my music" press, or an automatic check-in, and returns it with the code, lastError, audio and plan stage.
+- say: posts a short note (600 characters at most) in the Coach thread on the page.
+- The plan and your notes are the only things you can write.
+
+Live coaching ("coach me live"):
+- When the user says "coach me live", start a loop. Call wait_for_change. When it returns an event, answer it with say: short, Bob Ross rules, at most one hint, and a question. Then call wait_for_change again.
+- When wait_for_change returns {"event": null}, nothing happened. Call wait_for_change again at once, and say nothing.
+- Do not answer each run of the code. Answer only the events wait_for_change gives you; the user chooses how often they come.
+- Keep going until the user tells you to stop. In the chat, stay quiet: the user reads your notes on the page.
+- A long wait needs a long client tool timeout. In Claude Code, start it with MCP_TOOL_TIMEOUT=960000 (milliseconds). If a call times out on the client, call wait_for_change again with a smaller maxWaitSec.`;
 
 export function startSessionPrompt(mood?: string, minutes?: string): string {
   return `${COACH_RULES}
