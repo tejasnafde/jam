@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { LevelMeter } from "./LevelMeter";
 import { Logo } from "./Logo";
+import { PLAY_KEY } from "@/features/editor/defaultCode";
 import { PlayButton } from "./PlayButton";
 
 interface Props {
@@ -32,13 +33,13 @@ export function TopBar({ playing, onTogglePlay, panelOpen, onTogglePanel, status
         <LevelMeter playing={playing} />
       </div>
       <p className="flex items-center gap-1.5 text-xs text-muted-foreground max-xl:hidden" aria-label="Shortcuts">
-        <kbd className="jam-kbd">Ctrl</kbd>
+        <kbd className="jam-kbd">{PLAY_KEY}</kbd>
         <kbd className="jam-kbd">Enter</kbd>
         <span>plays</span>
         <span className="mx-1 text-gutter" aria-hidden="true">
           /
         </span>
-        <kbd className="jam-kbd">Ctrl</kbd>
+        <kbd className="jam-kbd">{PLAY_KEY}</kbd>
         <kbd className="jam-kbd">.</kbd>
         <span>stops</span>
       </p>

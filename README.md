@@ -9,7 +9,7 @@ Live at <https://jam.tn07.dev>.
 
 ## How a session works
 
-1. Sign in with Google and play. Every Ctrl+Enter saves a version. A few seconds later the page also saves an audio
+1. Sign in with Google and play. Every Ctrl+Enter (Option+Enter on a Mac) saves a version. A few seconds later the page also saves an audio
    snapshot: RMS loudness and the share of energy in the low (<250 Hz), mid and high (>4 kHz) bands.
 2. Add jam to your assistant: as a connector in claude.ai or ChatGPT (OAuth, no key to copy), or in Claude Code with
    a personal key from the side panel. Both are under "Connect an assistant".
