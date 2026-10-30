@@ -53,7 +53,7 @@ export const registerGetHistory: ToolRegistrar = (server, { uid, store }) => {
       annotations: READ_ONLY,
     },
     async ({ limit, include_diffs, session: name }) => {
-      let session = await store.currentSession(uid);
+      let session: { id: string; name: string } = await store.currentSession(uid);
       if (name !== undefined) {
         // Newest edit first, so a name used twice finds the one touched last.
         const all = await store.listSessions(uid);

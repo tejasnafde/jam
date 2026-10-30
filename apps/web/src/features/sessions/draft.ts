@@ -1,4 +1,4 @@
-import type { Session } from "@jam/shared";
+import type { Session, SessionSummary } from "@jam/shared";
 import { DEFAULT_CODE, LOCAL_CODE_KEY, PLAY_KEY } from "@/features/editor/defaultCode";
 
 /** Which session the editor text in localStorage belongs to, and when the user last typed in it. */
@@ -32,7 +32,10 @@ export function writeDraftMeta(meta: DraftMeta) {
  * The browser's text wins when it is newer than the session's last save, or when it
  * was written before sessions existed (or signed out) and is the user's own.
  */
-export function startCode(session: Session, local: { code: string | null; meta: DraftMeta | null }): string | null {
+export function startCode(
+  session: SessionSummary,
+  local: { code: string | null; meta: DraftMeta | null },
+): string | null {
   if (!session.lastCode || local.code === session.lastCode) return null;
   const { code, meta } = local;
   const own = !!code && code !== DEFAULT_CODE;

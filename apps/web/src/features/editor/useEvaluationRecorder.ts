@@ -1,5 +1,5 @@
 import { useCallback, useRef } from "react";
-import type { Api } from "@/lib/api";
+import { ApiError, type Api } from "@/lib/api";
 import { measure } from "@/lib/audio";
 
 const SETTLE_MS = 1000;
@@ -19,6 +19,8 @@ export function useEvaluationRecorder(
   /** The open session, read when the version is saved. Null leaves the choice to the server. */
   getSessionId: () => string | null = () => null,
   onSaved?: () => void,
+  /** The session was deleted elsewhere. Resolves when the code has a new session; the version is then saved there. */
+  onSessionGone?: () => Promise<void>,
 ) {
   const seq = useRef(0);
 
@@ -29,7 +31,14 @@ export function useEvaluationRecorder(
       const sessionId = getSessionId() ?? undefined;
       onStatus("saving");
       try {
-        const version = await api.saveVersion(code, sessionId);
+        let version;
+        try {
+          version = await api.saveVersion(code, sessionId);
+        } catch (err) {
+          if (!sessionId || !onSessionGone || !(err instanceof ApiError && err.status === 404)) throw err;
+          await onSessionGone();
+          version = await api.saveVersion(code, getSessionId() ?? undefined);
+        }
         onStatus("saved");
         onSaved?.();
         await new Promise((r) => setTimeout(r, SETTLE_MS));
@@ -43,6 +52,6 @@ export function useEvaluationRecorder(
         if (mine === seq.current) onStatus("failed");
       }
     },
-    [api, isPlaying, onStatus, getSessionId, onSaved],
+    [api, isPlaying, onStatus, getSessionId, onSaved, onSessionGone],
   );
 }

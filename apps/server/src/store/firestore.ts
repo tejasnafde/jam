@@ -24,6 +24,7 @@ import {
   type Session,
   type SessionError,
   type SessionPlan,
+  type SessionSummary,
 } from "@jam/shared";
 import { FieldValue, type DocumentSnapshot, type Firestore, type Query } from "firebase-admin/firestore";
 import { createHash } from "node:crypto";
@@ -168,9 +169,23 @@ export class FirestoreStore implements Store {
     return withId<SessionPlan>(await ref.get());
   }
 
-  async listSessions(uid: string) {
-    const snap = await this.sessions(uid).orderBy("updatedAt", "desc").get();
-    return snap.docs.map((d) => toSession(d));
+  async listSessions(uid: string): Promise<SessionSummary[]> {
+    // Only the list fields: lastCode and lastError can be large, and the page fetches the list often.
+    const snap = await this.sessions(uid)
+      .orderBy("updatedAt", "desc")
+      .select("name", "createdAt", "updatedAt", "versionCount", "planId")
+      .get();
+    return snap.docs.map((d) => {
+      const s = toSession(d);
+      return {
+        id: s.id,
+        name: s.name,
+        createdAt: s.createdAt,
+        updatedAt: s.updatedAt,
+        versionCount: s.versionCount,
+        planId: s.planId,
+      };
+    });
   }
 
   async getSession(uid: string, id: string) {
@@ -311,8 +326,8 @@ export class FirestoreStore implements Store {
   async deleteSession(uid: string, id: string) {
     const ref = this.sessions(uid).doc(id);
     if (!(await ref.get()).exists) return false;
-    // The session goes first, so a half-finished delete never leaves it pointing at nothing.
-    await ref.delete();
+    // Versions and plans go first, the session last: a half-finished delete leaves a session
+    // the user can delete again, never versions without a session that a new one could pick up.
     const user = this.user(uid);
     for (const name of ["versions", "plans"] as const) {
       const query = user.collection(name).where("sessionId", "==", id).select().limit(BATCH);
@@ -324,6 +339,7 @@ export class FirestoreStore implements Store {
         await batch.commit();
       }
     }
+    await ref.delete();
     await this.db.runTransaction(async (tx) => {
       const doc = await tx.get(user);
       if (doc.get("currentSessionId") === id) tx.update(user, { currentSessionId: FieldValue.delete() });

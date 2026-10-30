@@ -41,6 +41,7 @@ export function App({ panelOverride }: { panelOverride?: PanelOverride }) {
       getCode: () => editor.current?.getCode() ?? null,
       replaceCode: (code) => control.current?.replaceCode(code),
       flushVersions: () => control.current?.flushVersions(),
+      stopLive: () => control.current?.stopLive(),
     }),
     [],
   );
@@ -152,6 +153,7 @@ export function App({ panelOverride }: { panelOverride?: PanelOverride }) {
             onEdit={sessions.onEdit}
             getSessionId={sessions.getSessionId}
             onVersionSaved={onVersionSaved}
+            onSessionGone={sessions.onSessionGone}
             onEvalError={sessions.reportError}
           />
         </div>

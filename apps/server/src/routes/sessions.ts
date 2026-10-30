@@ -34,7 +34,11 @@ export function sessionsRouter(store: Store) {
       const { uid } = pageUser(req);
       // currentSession first: on the first load it makes "Untitled", which the list must include.
       const current = await store.currentSession(uid);
-      const response: SessionListResponse = { sessions: await store.listSessions(uid), currentId: current.id };
+      // Only the open session carries its text: the page reads no other.
+      const sessions = (await store.listSessions(uid)).map((s) =>
+        s.id === current.id ? { ...s, lastCode: current.lastCode } : s,
+      );
+      const response: SessionListResponse = { sessions, currentId: current.id };
       res.json(response);
     }),
   );

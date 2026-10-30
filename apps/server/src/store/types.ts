@@ -6,6 +6,7 @@ import type {
   Session,
   SessionError,
   SessionPlan,
+  SessionSummary,
 } from "@jam/shared";
 
 export interface TokenRecord {
@@ -119,8 +120,8 @@ export interface Store extends OAuthStore {
   /** The plan of a session, the current one by default. */
   currentPlan(uid: string, sessionId?: string): Promise<SessionPlan | null>;
   updatePlan(uid: string, planId: string, patch: PlanPatch): Promise<SessionPlan>;
-  /** Newest edit first. */
-  listSessions(uid: string): Promise<Session[]>;
+  /** Newest edit first. Light: no lastCode and no lastError. */
+  listSessions(uid: string): Promise<SessionSummary[]>;
   getSession(uid: string, id: string): Promise<Session | null>;
   /**
    * The session the user has open. When none is set, the most recently edited one. When the

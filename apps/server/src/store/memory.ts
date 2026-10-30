@@ -7,6 +7,7 @@ import {
   type Session,
   type SessionError,
   type SessionPlan,
+  type SessionSummary,
 } from "@jam/shared";
 import type {
   AuthCodeRecord,
@@ -126,10 +127,12 @@ export class MemoryStore implements Store {
     return this.sessions.get(uid)?.find((x) => x.id === id) ?? null;
   }
 
-  async listSessions(uid: string) {
-    return [...(this.sessions.get(uid) ?? [])]
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-      .map((x) => ({ ...x }));
+  private newest(uid: string) {
+    return [...(this.sessions.get(uid) ?? [])].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }
+
+  async listSessions(uid: string): Promise<SessionSummary[]> {
+    return this.newest(uid).map(({ lastCode: _code, lastError: _error, ...rest }) => ({ ...rest }));
   }
 
   async getSession(uid: string, id: string) {
@@ -140,10 +143,10 @@ export class MemoryStore implements Store {
   async currentSession(uid: string): Promise<Session> {
     const open = this.find(uid, this.current.get(uid) ?? "");
     if (open) return { ...open };
-    const newest = (await this.listSessions(uid))[0];
+    const newest = this.newest(uid)[0];
     if (newest) {
       this.current.set(uid, newest.id);
-      return newest;
+      return { ...newest };
     }
     // First load since sessions: "Untitled" claims what was made before.
     const legacy = (this.versions.get(uid) ?? []).filter((v) => !v.sessionId);
