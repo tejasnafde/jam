@@ -2,6 +2,7 @@ import type { SessionSummary, VersionEntry, VersionPage } from "@jam/shared";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { UNDO_KEY } from "@/features/editor/defaultCode";
+import { track } from "@/lib/analytics";
 import { ApiError, type Api } from "@/lib/api";
 import { freshName, NEW_SESSION_CODE, readDraft, startCode, versionTime, writeDraftMeta } from "./draft";
 
@@ -222,6 +223,7 @@ export function useSessions(api: Api | null, editor: EditorBridge) {
     const s = stateRef.current;
     if (!api || !s) return;
     const made = await api.createSession(freshName(s.sessions), NEW_SESSION_CODE);
+    track("piece_created");
     setState((st) => (st ? { ...st, sessions: [made, ...st.sessions] } : st));
     stateRef.current = { ...s, sessions: [made, ...s.sessions] };
     await open(made.id);
