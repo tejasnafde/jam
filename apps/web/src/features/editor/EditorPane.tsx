@@ -13,6 +13,8 @@ export interface EditorControl {
   replaceCode(code: string): void;
   /** Saves a Live version that waits for its window now. */
   flushVersions(): void;
+  /** Stops the music when Live mode plays, so a session switch does not keep the old piece going. */
+  stopLive(): void;
 }
 
 interface Props {
@@ -31,6 +33,8 @@ interface Props {
   /** The open session, read when a version is saved. */
   getSessionId?: () => string | null;
   onVersionSaved?: () => void;
+  /** The open session was deleted elsewhere: resolves once the code has a new session. */
+  onSessionGone?: () => Promise<void>;
   /** An evaluation failed (syntax or runtime): the code and the message the error bar shows. */
   onEvalError?: (code: string, message: string) => void;
 }
@@ -47,6 +51,7 @@ export function EditorPane({
   onEdit,
   getSessionId,
   onVersionSaved,
+  onSessionGone,
   onEvalError,
 }: Props) {
   const { api } = useAuth();
@@ -63,7 +68,14 @@ export function EditorPane({
   // Code waiting for the editor to load (a session opened before Strudel was ready).
   const pending = useRef<string | null>(null);
 
-  const record = useEvaluationRecorder(api, () => playing.current, onSaveStatus, getSessionId, onVersionSaved);
+  const record = useEvaluationRecorder(
+    api,
+    () => playing.current,
+    onSaveStatus,
+    getSessionId,
+    onVersionSaved,
+    onSessionGone,
+  );
   const recordRef = useRef(record);
   const onEditRef = useRef(onEdit);
   const onEvalErrorRef = useRef(onEvalError);
@@ -132,6 +144,11 @@ export function EditorPane({
         if (!frame) apply();
       },
       flushVersions: () => liveMode.current?.versions.flush(),
+      stopLive: () => {
+        if (!liveRef.current || !playing.current) return;
+        liveMode.current?.controller.cancel();
+        void editorRef.current?.stop();
+      },
     };
     return () => {
       cancelAnimationFrame(frame);

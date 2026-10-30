@@ -52,7 +52,8 @@ export function createApi(getIdToken: GetIdToken, base = "/api") {
     return (res.status === 204 ? null : await res.json()) as T;
   }
   const post = <T>(path: string, body: unknown) => call<T>(path, { method: "POST", body: JSON.stringify(body) });
-  const patch = <T>(path: string, body: unknown) => call<T>(path, { method: "PATCH", body: JSON.stringify(body) });
+  const patch = <T>(path: string, body: unknown, init: RequestInit = {}) =>
+    call<T>(path, { ...init, method: "PATCH", body: JSON.stringify(body) });
   const session = (id: string) => `/sessions/${encodeURIComponent(id)}`;
 
   return {
@@ -61,7 +62,9 @@ export function createApi(getIdToken: GetIdToken, base = "/api") {
     saveVersion: (code: string, sessionId?: string) => post<SaveVersionResponse>("/versions", { code, sessionId }),
     listSessions: () => call<SessionListResponse>("/sessions"),
     createSession: (name: string, lastCode: string) => post<Session>("/sessions", { name, lastCode }),
-    updateSession: (id: string, body: { name?: string; lastCode?: string }) => patch<Session>(session(id), body),
+    /** keepalive: the browser finishes the request after the tab closes. */
+    updateSession: (id: string, body: { name?: string; lastCode?: string }, opts: { keepalive?: boolean } = {}) =>
+      patch<Session>(session(id), body, opts.keepalive ? { keepalive: true } : {}),
     openSession: (id: string, previous?: { id: string; lastCode: string }) =>
       post<{ session: Session; plan: SessionPlan | null }>(`${session(id)}/open`, { previous }),
     duplicateSession: (id: string) => post<Session>(`${session(id)}/duplicate`, {}),
@@ -71,7 +74,9 @@ export function createApi(getIdToken: GetIdToken, base = "/api") {
     sessionVersions: (id: string, before?: string | null) =>
       call<VersionPage>(`${session(id)}/versions${before ? `?before=${encodeURIComponent(before)}` : ""}`),
     saveAudio: (snapshot: SaveAudioRequest) => post<{ id: string }>("/audio", snapshot),
-    currentPlan: () => call<SessionPlan | null>("/plan"),
+    /** The plan of the given session, or of the open one. */
+    currentPlan: (sessionId?: string | null) =>
+      call<SessionPlan | null>(sessionId ? `/plan?session=${encodeURIComponent(sessionId)}` : "/plan"),
     listTokens: () => call<TokenInfo[]>("/tokens"),
     createToken: (body: CreateTokenRequest) => post<CreateTokenResponse>("/tokens", body),
     revokeToken: (id: string) => call<null>(`/tokens/${encodeURIComponent(id)}`, { method: "DELETE" }),

@@ -40,8 +40,17 @@ export const sessionSchema = z.object({
 });
 export type Session = z.infer<typeof sessionSchema>;
 
+/**
+ * A session in the list. It has no lastError, and lastCode only for the open session:
+ * the page reads the text of the open one only, and the list is fetched after each evaluation.
+ */
+export const sessionSummarySchema = sessionSchema
+  .omit({ lastCode: true, lastError: true })
+  .extend({ lastCode: z.string().optional() });
+export type SessionSummary = z.infer<typeof sessionSummarySchema>;
+
 export const sessionListResponseSchema = z.object({
-  sessions: z.array(sessionSchema),
+  sessions: z.array(sessionSummarySchema),
   currentId: z.string(),
 });
 export type SessionListResponse = z.infer<typeof sessionListResponseSchema>;

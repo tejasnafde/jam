@@ -112,6 +112,25 @@ describe("sessions: CRUD", () => {
     await request(ctx.app).get("/api/sessions").expect(401);
   });
 
+  it("the list is light: no lastError, and lastCode only for the open session", async () => {
+    const ctx = setup();
+    const a = api(ctx);
+    await a.list();
+    const other = await a.create("Other", "other code");
+    await request(ctx.app)
+      .post(`/api/sessions/${other.id}/error`)
+      .set(ctx.asUser("alice"))
+      .send({ code: "bad(", message: "oops" })
+      .expect(204);
+    const open = await a.create("Open", "open code");
+    const list = await a.list();
+    expect(list.currentId).toBe(open.id);
+    const byId = Object.fromEntries(list.sessions.map((s) => [s.id, s]));
+    expect(byId[open.id]?.lastCode).toBe("open code");
+    expect(byId[other.id]).not.toHaveProperty("lastCode");
+    for (const s of list.sessions) expect(s).not.toHaveProperty("lastError");
+  });
+
   it("rejects ids that are not doc ids", async () => {
     const ctx = setup();
     await api(ctx).patch("a.b", { name: "x" }).expect(404);
@@ -133,7 +152,8 @@ describe("sessions: versions", () => {
     const list = await a.list();
     const byName = Object.fromEntries(list.sessions.map((s) => [s.name, s]));
     expect(byName.One).toMatchObject({ versionCount: 2, lastCode: "c" });
-    expect(byName.Two).toMatchObject({ versionCount: 1, lastCode: "b" });
+    expect(byName.Two).toMatchObject({ versionCount: 1 });
+    expect((await ctx.store.getSession("alice", two.id))?.lastCode).toBe("b");
     // The version just saved belongs to the session that is open now.
     expect(list.currentId).toBe(one.id);
   });
@@ -199,6 +219,27 @@ describe("sessions: plan per session", () => {
     expect((await getPlan()).currentStage).toBe(0);
     const back = (await a.open(two.id).expect(200)).body.plan;
     expect(back).toMatchObject({ destination: "plan two", currentStage: 3 });
+  });
+
+  it("/plan?session= reads the plan of the session the page shows, not the one evaluated last", async () => {
+    const ctx = setup();
+    const a = api(ctx);
+    const token = await ctx.mintFor("alice");
+    await a.list();
+    const lofi = await a.create("Rainy lofi loop");
+    await ctx.callTool(token, "set_session_plan", { destination: "lofi", stages });
+    const night = await a.create("Night drive");
+    await ctx.callTool(token, "set_session_plan", { destination: "night", stages });
+    // Another tab evaluates in the lofi session, which makes it the open one.
+    await a.save("s('bd')", lofi.id).expect(201);
+    const plan = (query: string) => request(ctx.app).get(`/api/plan${query}`).set(ctx.asUser("alice"));
+    expect((await plan(`?session=${night.id}`).expect(200)).body.destination).toBe("night");
+    expect((await plan("").expect(200)).body.destination).toBe("lofi");
+    expect((await plan("?session=gone").expect(200)).body).toBeNull();
+    await plan("?session=a.b").expect(400);
+    // Another user's id is never found.
+    const bob = await request(ctx.app).get(`/api/plan?session=${night.id}`).set(ctx.asUser("bob")).expect(200);
+    expect(bob.body).toBeNull();
   });
 
   it("copies the plan when a session is duplicated", async () => {

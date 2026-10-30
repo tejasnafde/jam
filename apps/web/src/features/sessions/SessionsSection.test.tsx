@@ -72,7 +72,7 @@ describe("SessionsSection", () => {
     const list = await screen.findByRole("list", { name: "Rainy loop versions" });
     expect(list).toHaveTextContent(/s\('bd sd'\).*s\('bd'\)/);
     fireEvent.click(screen.getAllByRole("button", { name: /^Restore version/ })[1] as HTMLElement);
-    expect(h.restore).toHaveBeenCalledWith("a", "s('bd')");
+    expect(h.restore).toHaveBeenCalledWith("a", expect.objectContaining({ code: "s('bd')" }));
     fireEvent.click(screen.getByRole("button", { name: "Show older versions" }));
     await waitFor(() => expect(h.loadVersions).toHaveBeenLastCalledWith("a", "2026-10-01T10:00:00Z"));
   });

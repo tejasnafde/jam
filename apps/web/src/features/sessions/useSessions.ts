@@ -1,8 +1,9 @@
-import type { Session, VersionPage } from "@jam/shared";
+import type { SessionSummary, VersionEntry, VersionPage } from "@jam/shared";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import type { Api } from "@/lib/api";
-import { freshName, NEW_SESSION_CODE, readDraft, startCode, writeDraftMeta } from "./draft";
+import { UNDO_KEY } from "@/features/editor/defaultCode";
+import { ApiError, type Api } from "@/lib/api";
+import { freshName, NEW_SESSION_CODE, readDraft, startCode, versionTime, writeDraftMeta } from "./draft";
 
 /** What the sessions need from the editor. None of it evaluates code. */
 export interface EditorBridge {
@@ -12,10 +13,12 @@ export interface EditorBridge {
   replaceCode(code: string): void;
   /** Saves a Live version that waits for its window now, so it lands in the session it was made in. */
   flushVersions(): void;
+  /** Stops the music when Live mode plays, so the old piece does not go on under the new text. */
+  stopLive(): void;
 }
 
 export interface SessionsHandle {
-  sessions: Session[];
+  sessions: SessionSummary[];
   /** The open session. Null while signed out or loading. */
   currentId: string | null;
   create(): Promise<void>;
@@ -23,20 +26,26 @@ export interface SessionsHandle {
   rename(id: string, name: string): Promise<void>;
   duplicate(id: string): Promise<void>;
   remove(id: string): Promise<void>;
-  /** Puts an older version's code in the editor as a new edit (opening its session first). Never evaluates. */
-  restore(sessionId: string, code: string): Promise<void>;
+  /**
+   * Puts an older version's code in the editor as a new edit (opening its session first). Never evaluates.
+   * A toast says how to get the replaced text back.
+   */
+  restore(sessionId: string, version: Pick<VersionEntry, "code" | "createdAt">): Promise<void>;
   loadVersions(id: string, before?: string | null): Promise<VersionPage>;
 }
 
 /** How long the editor text waits after the last keystroke before it is saved as the session's lastCode. */
 export const DRAFT_SAVE_MS = 3000;
 
-const byEdit = (list: Session[]) => [...list].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+const byEdit = (list: SessionSummary[]) => [...list].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 
 const fail = (what: string) => (err: unknown) => {
   console.error(err);
   toast.error(`Could not ${what}. ${err instanceof Error ? err.message : ""}`.trim());
 };
+
+/** The server no longer has the session: another tab or computer deleted it. */
+export const isGone = (err: unknown) => err instanceof ApiError && err.status === 404;
 
 /**
  * Named sessions. The open one gets every version, its own plan, and a saved draft of the
@@ -45,7 +54,7 @@ const fail = (what: string) => (err: unknown) => {
  */
 export function useSessions(api: Api | null, editor: EditorBridge) {
   // Tagged with the account it was loaded for, so a sign-out never shows stale sessions.
-  const [state, setState] = useState<{ api: Api; sessions: Session[]; currentId: string } | null>(null);
+  const [state, setState] = useState<{ api: Api; sessions: SessionSummary[]; currentId: string } | null>(null);
   const live = state && state.api === api ? state : null;
   const stateRef = useRef(live);
   useLayoutEffect(() => {
@@ -54,23 +63,61 @@ export function useSessions(api: Api | null, editor: EditorBridge) {
   const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingDraft = useRef<{ id: string; code: string } | null>(null);
 
-  const patchLocal = useCallback((id: string, patch: Partial<Session>) => {
+  const patchLocal = useCallback((id: string, patch: Partial<SessionSummary>) => {
     setState((s) =>
       s ? { ...s, sessions: byEdit(s.sessions.map((x) => (x.id === id ? { ...x, ...patch } : x))) } : s,
     );
   }, []);
 
-  const saveDraftNow = useCallback(async () => {
+  const clearDraft = useCallback(() => {
     if (draftTimer.current) clearTimeout(draftTimer.current);
     draftTimer.current = null;
-    const draft = pendingDraft.current;
     pendingDraft.current = null;
-    if (!api || !draft) return;
-    const known = stateRef.current?.sessions.find((x) => x.id === draft.id);
-    if (!known || known.lastCode === draft.code) return;
-    const saved = await api.updateSession(draft.id, { lastCode: draft.code });
-    patchLocal(saved.id, saved);
-  }, [api, patchLocal]);
+  }, []);
+
+  const rescuing = useRef<Promise<void> | null>(null);
+  /**
+   * The open session was deleted elsewhere. The editor text goes into a new session, so
+   * the next versions and drafts are kept. Calls made at the same time share one rescue.
+   */
+  const rescue = useCallback((): Promise<void> => {
+    if (rescuing.current) return rescuing.current;
+    const run = async () => {
+      const gone = stateRef.current?.currentId;
+      if (!api || !gone) return;
+      const { sessions } = await api.listSessions();
+      if (stateRef.current?.currentId !== gone || sessions.some((x) => x.id === gone)) return;
+      clearDraft();
+      const made = await api.createSession(freshName(sessions), editor.getCode() || NEW_SESSION_CODE);
+      const next = { api, sessions: byEdit([made, ...sessions.filter((x) => x.id !== made.id)]), currentId: made.id };
+      setState(next);
+      stateRef.current = next;
+      writeDraftMeta({ sessionId: made.id, editedAt: Date.now() });
+      toast(`That session was deleted. Your code is now in ${made.name}.`);
+    };
+    rescuing.current = run().finally(() => {
+      rescuing.current = null;
+    });
+    return rescuing.current;
+  }, [api, editor, clearDraft]);
+
+  const saveDraftNow = useCallback(
+    async (opts: { keepalive?: boolean } = {}) => {
+      const draft = pendingDraft.current;
+      clearDraft();
+      if (!api || !draft) return;
+      const known = stateRef.current?.sessions.find((x) => x.id === draft.id);
+      if (!known || known.lastCode === draft.code) return;
+      try {
+        const saved = await api.updateSession(draft.id, { lastCode: draft.code }, opts);
+        patchLocal(saved.id, saved);
+      } catch (err) {
+        if (isGone(err) && draft.id === stateRef.current?.currentId) return rescue();
+        throw err;
+      }
+    },
+    [api, patchLocal, rescue, clearDraft],
+  );
 
   const scheduleDraft = useCallback(
     (id: string, code: string) => {
@@ -118,7 +165,8 @@ export function useSessions(api: Api | null, editor: EditorBridge) {
   // Leaving the page: the last keystrokes still go to the server.
   useEffect(() => {
     const flush = () => {
-      if (document.visibilityState === "hidden") void saveDraftNow().catch(console.error);
+      // keepalive: the browser may cancel a normal request when the tab closes.
+      if (document.visibilityState === "hidden") void saveDraftNow({ keepalive: true }).catch(console.error);
     };
     document.addEventListener("visibilitychange", flush);
     return () => document.removeEventListener("visibilitychange", flush);
@@ -147,9 +195,7 @@ export function useSessions(api: Api | null, editor: EditorBridge) {
       if (!api || !s || s.currentId === id) return;
       // A waiting Live version belongs to the session the user leaves.
       editor.flushVersions();
-      if (draftTimer.current) clearTimeout(draftTimer.current);
-      draftTimer.current = null;
-      pendingDraft.current = null;
+      clearDraft();
       const code = editor.getCode();
       const previous = code === null ? undefined : { id: s.currentId, lastCode: code };
       const { session } = await api.openSession(id, previous);
@@ -165,10 +211,11 @@ export function useSessions(api: Api | null, editor: EditorBridge) {
         return { ...st, sessions: byEdit(sessions), currentId: session.id };
       });
       stateRef.current = { ...s, currentId: session.id };
+      editor.stopLive();
       editor.replaceCode(session.lastCode);
       writeDraftMeta({ sessionId: session.id, editedAt: Date.parse(session.updatedAt) });
     },
-    [api, editor],
+    [api, editor, clearDraft],
   );
 
   const create = useCallback(async () => {
@@ -200,6 +247,7 @@ export function useSessions(api: Api | null, editor: EditorBridge) {
       }
       const copy = await api.duplicateSession(id);
       setState((st) => (st ? { ...st, sessions: byEdit([copy, ...st.sessions]) } : st));
+      toast(`Made ${copy.name}.`);
     },
     [api, editor, saveDraftNow],
   );
@@ -211,9 +259,7 @@ export function useSessions(api: Api | null, editor: EditorBridge) {
       const wasOpen = id === s.currentId;
       if (wasOpen) {
         editor.flushVersions();
-        if (draftTimer.current) clearTimeout(draftTimer.current);
-        draftTimer.current = null;
-        pendingDraft.current = null;
+        clearDraft();
       }
       await api.deleteSession(id);
       // The server picks the next session (or makes a new Untitled one).
@@ -221,20 +267,23 @@ export function useSessions(api: Api | null, editor: EditorBridge) {
       setState({ api, sessions: byEdit(sessions), currentId: wasOpen ? currentId : s.currentId });
       if (!wasOpen) return;
       const next = sessions.find((x) => x.id === currentId);
-      editor.replaceCode(next?.lastCode ?? "");
+      editor.stopLive();
+      // A new Untitled session has no text: starter code shows what to type.
+      editor.replaceCode(next?.lastCode || NEW_SESSION_CODE);
       writeDraftMeta({ sessionId: currentId, editedAt: next ? Date.parse(next.updatedAt) : Date.now() });
     },
-    [api, editor],
+    [api, editor, clearDraft],
   );
 
   const restore = useCallback(
-    async (sessionId: string, code: string) => {
+    async (sessionId: string, { code, createdAt }: Pick<VersionEntry, "code" | "createdAt">) => {
       if (stateRef.current?.currentId !== sessionId) await open(sessionId);
       if (stateRef.current?.currentId !== sessionId) return;
       editor.replaceCode(code);
       // A new edit: saved as the session's text like any other, and never evaluated.
       writeDraftMeta({ sessionId, editedAt: Date.now() });
       scheduleDraft(sessionId, code);
+      toast(`Put the version from ${versionTime(createdAt)} in the editor. ${UNDO_KEY}+Z brings your text back.`);
     },
     [editor, open, scheduleDraft],
   );
@@ -256,7 +305,7 @@ export function useSessions(api: Api | null, editor: EditorBridge) {
       rename: (id, name) => rename(id, name).catch(fail("rename that session")),
       duplicate: (id) => duplicate(id).catch(fail("duplicate that session")),
       remove: (id) => remove(id).catch(fail("delete that session")),
-      restore: (id, code) => restore(id, code).catch(fail("restore that version")),
+      restore: (id, version) => restore(id, version).catch(fail("restore that version")),
       loadVersions,
     }),
     [live, create, open, rename, duplicate, remove, restore, loadVersions],
@@ -274,5 +323,5 @@ export function useSessions(api: Api | null, editor: EditorBridge) {
     [api],
   );
 
-  return { handle, onEdit, refresh, getSessionId, reportError };
+  return { handle, onEdit, refresh, getSessionId, reportError, onSessionGone: rescue };
 }

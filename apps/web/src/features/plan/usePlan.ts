@@ -13,7 +13,7 @@ export function usePlan(api: Api | null, sessionId: string | null = null): Sessi
   // Tagged with the account and session it was loaded for, so a switch never shows a stale plan.
   const [loaded, setLoaded] = useState<{ api: Api; sessionId: string | null; plan: SessionPlan | null } | null>(null);
   const load = useCallback(async () => {
-    if (api) setLoaded({ api, sessionId, plan: await api.currentPlan() });
+    if (api) setLoaded({ api, sessionId, plan: await api.currentPlan(sessionId) });
   }, [api, sessionId]);
   usePolling(api ? load : null, POLL_MS, sessionId);
   return loaded && loaded.api === api && loaded.sessionId === sessionId ? loaded.plan : null;

@@ -1,4 +1,4 @@
-import type { Session, VersionEntry } from "@jam/shared";
+import type { SessionSummary, VersionEntry } from "@jam/shared";
 import { ChevronRight, Copy, Ellipsis, Eye, Loader2, Pencil, Plus, Trash2, Undo2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -112,7 +112,7 @@ function PreviewDialog({
 }
 
 /** A session's versions, newest first, one page at a time. */
-function VersionList({ session, sessions }: { session: Session; sessions: SessionsHandle }) {
+function VersionList({ session, sessions }: { session: SessionSummary; sessions: SessionsHandle }) {
   const [versions, setVersions] = useState<VersionEntry[]>([]);
   const [next, setNext] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -156,7 +156,7 @@ function VersionList({ session, sessions }: { session: Session; sessions: Sessio
 
   const restore = (v: VersionEntry) => {
     setPreview(null);
-    void sessions.restore(session.id, v.code);
+    void sessions.restore(session.id, v);
   };
 
   return (
@@ -243,7 +243,7 @@ function SessionRow({
   onToggle,
   onRenaming,
 }: {
-  session: Session;
+  session: SessionSummary;
   current: boolean;
   expanded: boolean;
   renaming: boolean;
