@@ -18,6 +18,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { PLAY_KEY } from "@/features/editor/defaultCode";
 import { cn } from "@/lib/utils";
 import { relativeTime, versionTime } from "./draft";
 import type { SessionsHandle } from "./useSessions";
@@ -212,7 +213,7 @@ function VersionList({ session, sessions }: { session: Session; sessions: Sessio
         </button>
       )}
       {!loading && !failed && versions.length === 0 && (
-        <p className="py-1.5 text-xs text-muted-foreground">No versions yet. Each Ctrl+Enter saves one.</p>
+        <p className="py-1.5 text-xs text-muted-foreground">No versions yet. Each {PLAY_KEY}+Enter saves one.</p>
       )}
       {!loading && next && (
         <button

@@ -261,6 +261,29 @@ describe("sessions: MCP", () => {
   });
 });
 
+describe("sessions: lastError", () => {
+  it("get_current_code shows the last failed evaluation until a good one clears it", async () => {
+    const ctx = setup();
+    const a = api(ctx);
+    const { currentId } = await a.list();
+    await a.save("s('bd')", currentId).expect(201);
+    const report = (id: string, body: object, uid = "alice") =>
+      request(ctx.app).post(`/api/sessions/${id}/error`).set(ctx.asUser(uid)).send(body);
+    await report(currentId, { code: "s('bd' oops", message: "Unexpected token" }).expect(204);
+    await report(currentId, { code: "s('bd' oops2", message: "Still wrong" }).expect(204);
+    await report(currentId, { code: "x" }).expect(400);
+    await report(currentId, { code: "x", message: "y" }, "bob").expect(404);
+    const token = await ctx.mintFor("alice");
+    const withError = jsonOf<{ code: string; lastError?: { code: string; message: string; at: string } }>(
+      await ctx.callTool(token, "get_current_code"),
+    );
+    expect(withError.code).toBe("s('bd')");
+    expect(withError.lastError).toMatchObject({ code: "s('bd' oops2", message: "Still wrong" });
+    await a.save("s('bd sd')", currentId).expect(201);
+    expect(jsonOf(await ctx.callTool(token, "get_current_code")).lastError).toBeUndefined();
+  });
+});
+
 describe("MemoryStore sessions", () => {
   it("returns null for a version in a session that does not exist", async () => {
     const store = new MemoryStore();

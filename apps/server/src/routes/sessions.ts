@@ -2,6 +2,7 @@ import {
   createSessionRequestSchema,
   duplicateSessionRequestSchema,
   openSessionRequestSchema,
+  reportErrorRequestSchema,
   SessionId,
   summarizeChange,
   updateSessionRequestSchema,
@@ -94,6 +95,19 @@ export function sessionsRouter(store: Store) {
       const id = sessionParam(req, res);
       if (!id) return;
       if (!(await store.deleteSession(pageUser(req).uid, id))) return notFound(res);
+      res.status(204).end();
+    }),
+  );
+
+  // An evaluation failed: kept as the session's lastError (one, overwritten) so the coach can see it.
+  router.post(
+    "/:id/error",
+    asyncHandler(async (req, res) => {
+      const id = sessionParam(req, res);
+      const body = id && parseBody(reportErrorRequestSchema, req, res);
+      if (!id || !body) return;
+      const saved = await store.setSessionError(pageUser(req).uid, id, { ...body, at: new Date().toISOString() });
+      if (!saved) return notFound(res);
       res.status(204).end();
     }),
   );

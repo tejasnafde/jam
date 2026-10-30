@@ -66,6 +66,8 @@ export function createApi(getIdToken: GetIdToken, base = "/api") {
       post<{ session: Session; plan: SessionPlan | null }>(`${session(id)}/open`, { previous }),
     duplicateSession: (id: string) => post<Session>(`${session(id)}/duplicate`, {}),
     deleteSession: (id: string) => call<null>(session(id), { method: "DELETE" }),
+    reportError: (id: string, code: string, message: string) =>
+      call<null>(`${session(id)}/error`, { method: "POST", body: JSON.stringify({ code, message }) }),
     sessionVersions: (id: string, before?: string | null) =>
       call<VersionPage>(`${session(id)}/versions${before ? `?before=${encodeURIComponent(before)}` : ""}`),
     saveAudio: (snapshot: SaveAudioRequest) => post<{ id: string }>("/audio", snapshot),

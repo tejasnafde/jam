@@ -22,6 +22,7 @@ import {
   type CodeVersion,
   type PlanInput,
   type Session,
+  type SessionError,
   type SessionPlan,
 } from "@jam/shared";
 import { FieldValue, type DocumentSnapshot, type Firestore, type Query } from "firebase-admin/firestore";
@@ -101,13 +102,18 @@ export class FirestoreStore implements Store {
       if (top && top.get("code") === code) {
         const evalCount = Number(top.get("evalCount") ?? 1) + 1;
         tx.update(top.ref, { evaluatedAt: ts, evalCount });
-        tx.update(sessionRef, { lastCode: code, updatedAt: ts });
+        tx.update(sessionRef, { lastCode: code, updatedAt: ts, lastError: null });
         return { ...withId<CodeVersion>(top), evaluatedAt: ts, evalCount };
       }
       const ref = versions.doc();
       const version = { code, createdAt: ts, evaluatedAt: ts, evalCount: 1, sessionId };
       tx.set(ref, version);
-      tx.update(sessionRef, { lastCode: code, updatedAt: ts, versionCount: FieldValue.increment(1) });
+      tx.update(sessionRef, {
+        lastCode: code,
+        updatedAt: ts,
+        lastError: null,
+        versionCount: FieldValue.increment(1),
+      });
       return { id: ref.id, ...version };
     });
   }
@@ -290,6 +296,16 @@ export class FirestoreStore implements Store {
       ...(plan.note ? { note: plan.note } : {}),
     });
     return { ...copy, planId: saved.id };
+  }
+
+  async setSessionError(uid: string, id: string, error: SessionError | null) {
+    try {
+      // update, not set: it fails when the session does not exist.
+      await this.sessions(uid).doc(id).update({ lastError: error });
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   async deleteSession(uid: string, id: string) {

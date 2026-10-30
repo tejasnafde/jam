@@ -31,6 +31,8 @@ interface Props {
   /** The open session, read when a version is saved. */
   getSessionId?: () => string | null;
   onVersionSaved?: () => void;
+  /** An evaluation failed (syntax or runtime): the code and the message the error bar shows. */
+  onEvalError?: (code: string, message: string) => void;
 }
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
@@ -45,6 +47,7 @@ export function EditorPane({
   onEdit,
   getSessionId,
   onVersionSaved,
+  onEvalError,
 }: Props) {
   const { api } = useAuth();
   const [note, setNote] = useState<string | null>(null);
@@ -63,7 +66,18 @@ export function EditorPane({
   const record = useEvaluationRecorder(api, () => playing.current, onSaveStatus, getSessionId, onVersionSaved);
   const recordRef = useRef(record);
   const onEditRef = useRef(onEdit);
+  const onEvalErrorRef = useRef(onEvalError);
+  // The last error reported, so one failure is sent once, not on every state update.
+  const reported = useRef<string | null>(null);
+  const reportError = useCallback((code: string, err: unknown) => {
+    const message = errorText(err);
+    const key = `${message}\n${code}`;
+    if (reported.current === key) return;
+    reported.current = key;
+    onEvalErrorRef.current?.(code, message);
+  }, []);
   useLayoutEffect(() => {
+    onEvalErrorRef.current = onEvalError;
     recordRef.current = record;
     liveRef.current = live;
     onEditRef.current = onEdit;
@@ -145,28 +159,36 @@ export function EditorPane({
           onEditRef.current?.(code);
         }
       }
+      if (s.schedulerError) reportError(s.activeCode, s.schedulerError);
       if (s.schedulerError && controller?.onSchedulerError(s.activeCode)) setLiveNote(errorText(s.schedulerError));
       const err = s.evalError ?? s.schedulerError;
       setNote(err ? errorText(err) : null);
     },
-    [onPlayingChange, editorRef],
+    [onPlayingChange, editorRef, reportError],
   );
 
-  const onEvaluated = useCallback((s: StrudelState) => {
-    if (reverting.current !== null && s.activeCode === reverting.current) {
-      reverting.current = null;
-      return;
-    }
-    const mode = liveMode.current;
-    if (!mode) return;
-    const { controller, versions } = mode;
-    if (s.evalError) return controller.onEvalError(s.code);
-    const wasLive = controller.evaluatingLive;
-    controller.onEvaluated(s.activeCode);
-    setLiveNote(null);
-    if (wasLive) versions.live(s.activeCode);
-    else versions.explicit(s.activeCode);
-  }, []);
+  const onEvaluated = useCallback(
+    (s: StrudelState) => {
+      if (reverting.current !== null && s.activeCode === reverting.current) {
+        reverting.current = null;
+        return;
+      }
+      const mode = liveMode.current;
+      if (!mode) return;
+      const { controller, versions } = mode;
+      if (s.evalError) {
+        reportError(s.code, s.evalError);
+        return controller.onEvalError(s.code);
+      }
+      reported.current = null;
+      const wasLive = controller.evaluatingLive;
+      controller.onEvaluated(s.activeCode);
+      setLiveNote(null);
+      if (wasLive) versions.live(s.activeCode);
+      else versions.explicit(s.activeCode);
+    },
+    [reportError],
+  );
 
   return (
     <section className="relative flex min-h-0 min-w-0 flex-1 flex-col" aria-label="Code editor">
