@@ -13,6 +13,7 @@ import { registerGetHistory } from "./tools/getHistory.js";
 import { registerGetSample } from "./tools/getSample.js";
 import { registerGetSessionPlan } from "./tools/getSessionPlan.js";
 import { registerListSamples } from "./tools/listSamples.js";
+import { registerListSessions } from "./tools/listSessions.js";
 import { registerLookupSound } from "./tools/lookupSound.js";
 import { registerSetSessionPlan } from "./tools/setSessionPlan.js";
 import { registerSetStage } from "./tools/setStage.js";
@@ -20,6 +21,7 @@ import { registerSetStage } from "./tools/setStage.js";
 const TOOLS: Record<string, ToolRegistrar> = {
   get_current_code: registerGetCurrentCode,
   get_history: registerGetHistory,
+  list_sessions: registerListSessions,
   get_audio_snapshot: registerGetAudioSnapshot,
   lookup_sound: registerLookupSound,
   get_session_plan: registerGetSessionPlan,

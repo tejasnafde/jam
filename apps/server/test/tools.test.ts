@@ -53,11 +53,14 @@ describe("get_history", () => {
     const { saveCode, mintFor, callTool } = setup();
     for (const code of ['s("bd")', 's("bd sd")', 's("bd sd hh")']) await saveCode("alice", code);
     const token = await mintFor("alice");
-    const diffs = jsonOf<{ diff?: string; code?: string }[]>(await callTool(token, "get_history", { limit: 2 }));
+    type History = { session: string; versions: { diff?: string; code?: string }[] };
+    const history = jsonOf<History>(await callTool(token, "get_history", { limit: 2 }));
+    expect(history.session).toBe("Untitled");
+    const diffs = history.versions;
     expect(diffs).toHaveLength(2);
     expect(diffs[0]?.diff).toContain('+s("bd sd hh")');
     expect(diffs[1]?.diff).toContain('-s("bd")');
-    const full = jsonOf<{ code?: string }[]>(await callTool(token, "get_history", { limit: 3, include_diffs: false }));
+    const full = jsonOf<History>(await callTool(token, "get_history", { limit: 3, include_diffs: false })).versions;
     expect(full[2]?.code).toBe('s("bd")');
   });
 

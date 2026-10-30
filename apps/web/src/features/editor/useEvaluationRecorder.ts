@@ -12,17 +12,26 @@ export type SaveStatus = "idle" | "saving" | "saved" | "failed" | "signed-out";
  * stores that as the version's audio snapshot. A newer evaluation cancels the
  * pending measurement of an older one.
  */
-export function useEvaluationRecorder(api: Api | null, isPlaying: () => boolean, onStatus: (s: SaveStatus) => void) {
+export function useEvaluationRecorder(
+  api: Api | null,
+  isPlaying: () => boolean,
+  onStatus: (s: SaveStatus) => void,
+  /** The open session, read when the version is saved. Null leaves the choice to the server. */
+  getSessionId: () => string | null = () => null,
+  onSaved?: () => void,
+) {
   const seq = useRef(0);
 
   return useCallback(
     async (code: string) => {
       if (!api) return onStatus("signed-out");
       const mine = ++seq.current;
+      const sessionId = getSessionId() ?? undefined;
       onStatus("saving");
       try {
-        const version = await api.saveVersion(code);
+        const version = await api.saveVersion(code, sessionId);
         onStatus("saved");
+        onSaved?.();
         await new Promise((r) => setTimeout(r, SETTLE_MS));
         if (mine !== seq.current || !isPlaying()) return;
         const reading = await measure(WINDOW_MS);
@@ -34,6 +43,6 @@ export function useEvaluationRecorder(api: Api | null, isPlaying: () => boolean,
         if (mine === seq.current) onStatus("failed");
       }
     },
-    [api, isPlaying, onStatus],
+    [api, isPlaying, onStatus, getSessionId, onSaved],
   );
 }

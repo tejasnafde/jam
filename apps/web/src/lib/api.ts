@@ -1,5 +1,4 @@
 import type {
-  CodeVersion,
   ConsentDecisionResponse,
   ConsentRequestInfo,
   GrantInfo,
@@ -9,8 +8,11 @@ import type {
   PrepStatusResponse,
   SaveAudioRequest,
   SaveVersionResponse,
+  Session,
+  SessionListResponse,
   SessionPlan,
   TokenInfo,
+  VersionPage,
 } from "@jam/shared";
 
 export type GetIdToken = () => Promise<string>;
@@ -50,12 +52,22 @@ export function createApi(getIdToken: GetIdToken, base = "/api") {
     return (res.status === 204 ? null : await res.json()) as T;
   }
   const post = <T>(path: string, body: unknown) => call<T>(path, { method: "POST", body: JSON.stringify(body) });
+  const patch = <T>(path: string, body: unknown) => call<T>(path, { method: "PATCH", body: JSON.stringify(body) });
+  const session = (id: string) => `/sessions/${encodeURIComponent(id)}`;
 
   return {
     /** The raw authenticated call, for feature clients such as samples-api. */
     request: call,
-    saveVersion: (code: string) => post<SaveVersionResponse>("/versions", { code }),
-    latestVersion: () => call<CodeVersion | null>("/versions/latest"),
+    saveVersion: (code: string, sessionId?: string) => post<SaveVersionResponse>("/versions", { code, sessionId }),
+    listSessions: () => call<SessionListResponse>("/sessions"),
+    createSession: (name: string, lastCode: string) => post<Session>("/sessions", { name, lastCode }),
+    updateSession: (id: string, body: { name?: string; lastCode?: string }) => patch<Session>(session(id), body),
+    openSession: (id: string, previous?: { id: string; lastCode: string }) =>
+      post<{ session: Session; plan: SessionPlan | null }>(`${session(id)}/open`, { previous }),
+    duplicateSession: (id: string) => post<Session>(`${session(id)}/duplicate`, {}),
+    deleteSession: (id: string) => call<null>(session(id), { method: "DELETE" }),
+    sessionVersions: (id: string, before?: string | null) =>
+      call<VersionPage>(`${session(id)}/versions${before ? `?before=${encodeURIComponent(before)}` : ""}`),
     saveAudio: (snapshot: SaveAudioRequest) => post<{ id: string }>("/audio", snapshot),
     currentPlan: () => call<SessionPlan | null>("/plan"),
     listTokens: () => call<TokenInfo[]>("/tokens"),

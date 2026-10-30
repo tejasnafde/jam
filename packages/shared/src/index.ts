@@ -3,16 +3,10 @@
 // inferred types so both sides agree on the wire format.
 
 import { z } from "zod";
+import { LIMITS } from "./limits.js";
+import { SessionId } from "./sessions.js";
 
-export const LIMITS = {
-  codeMaxChars: 100_000,
-  stagesMin: 4,
-  stagesMax: 6,
-  tokensPerUser: 10,
-  historyMax: 50,
-  audioWindowMaxMs: 60_000,
-  oauthGrantsPerUser: 20,
-} as const;
+export { LIMITS };
 
 /** The one OAuth scope. It covers every MCP tool: read code, history and sound, and write the plan. */
 export const OAUTH_SCOPE = "jam";
@@ -25,6 +19,8 @@ export const codeVersionSchema = z.object({
   createdAt: z.string(),
   evaluatedAt: z.string(),
   evalCount: z.number().int(),
+  /** The session it belongs to. Versions from before sessions have none until the Untitled session claims them. */
+  sessionId: z.string().optional(),
 });
 export type CodeVersion = z.infer<typeof codeVersionSchema>;
 
@@ -70,6 +66,7 @@ export const sessionPlanSchema = planInputSchema.extend({
   note: z.string().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
+  sessionId: z.string().optional(),
 });
 export type SessionPlan = z.infer<typeof sessionPlanSchema>;
 
@@ -85,10 +82,16 @@ export type TokenInfo = z.infer<typeof tokenInfoSchema>;
 
 export const saveVersionRequestSchema = z.object({
   code: z.string().max(LIMITS.codeMaxChars),
+  /** The session the page has open. Without it the version goes to the current session. */
+  sessionId: SessionId.optional(),
 });
 export type SaveVersionRequest = z.infer<typeof saveVersionRequestSchema>;
 
-export const saveVersionResponseSchema = z.object({ id: z.string(), evalCount: z.number().int() });
+export const saveVersionResponseSchema = z.object({
+  id: z.string(),
+  evalCount: z.number().int(),
+  sessionId: z.string().nullable(),
+});
 export type SaveVersionResponse = z.infer<typeof saveVersionResponseSchema>;
 
 export const saveAudioRequestSchema = audioReadingSchema.extend({
@@ -143,3 +146,4 @@ export * from "./ids.js";
 export * from "./prep.js";
 export * from "./prepRequest.js";
 export * from "./sounds.js";
+export * from "./sessions.js";
