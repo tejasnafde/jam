@@ -1,11 +1,11 @@
 import type { SampleWithUrl } from "@jam/shared";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { PrepHandle } from "@/features/prep/usePrep";
 import { LibrarySection } from "./LibrarySection";
-import { contentTypeOf, sampleFacts, toSampleName } from "./sampleFile";
+import { contentTypeOf, sampleFacts, sortDroppedFiles, toSampleName } from "./sampleFile";
 
 const take: SampleWithUrl = {
   id: "s1",
@@ -91,5 +91,35 @@ describe("LibrarySection", () => {
   it("hides the Prep menu without a prep handle", () => {
     render(<LibrarySection signedIn samples={[take]} uploading={false} onUpload={vi.fn()} onDelete={vi.fn()} />);
     expect(screen.queryByRole("button", { name: "Prep mytake" })).toBeNull();
+  });
+});
+
+describe("dropped files", () => {
+  const file = (name: string, size: number) => ({ name, size });
+
+  it("accepts mp3 and wav up to 50 MB and says why it refuses the rest", () => {
+    const { accepted, rejected } = sortDroppedFiles([
+      file("a.mp3", 10),
+      file("b.WAV", 50 * 1024 * 1024),
+      file("c.flac", 10),
+      file("d.wav", 50 * 1024 * 1024 + 1),
+      file("e.mp3", 0),
+    ]);
+    expect(accepted.map((f) => f.name)).toEqual(["a.mp3", "b.WAV"]);
+    expect(rejected).toEqual([
+      { name: "c.flac", reason: "is not an mp3 or wav file" },
+      { name: "d.wav", reason: "is larger than 50 MB" },
+      { name: "e.mp3", reason: "is empty" },
+    ]);
+  });
+
+  it("uploads audio files dropped on the Library", () => {
+    const onUpload = vi.fn();
+    render(<LibrarySection signedIn samples={[]} uploading={false} onUpload={onUpload} onDelete={vi.fn()} />);
+    const song = new File(["x"], "song.wav", { type: "audio/wav" });
+    const text = new File(["x"], "notes.txt", { type: "text/plain" });
+    const dataTransfer = { types: ["Files"], files: [song, text], dropEffect: "" };
+    fireEvent.drop(screen.getByTestId("library-drop"), { dataTransfer });
+    expect(onUpload).toHaveBeenCalledExactlyOnceWith(song);
   });
 });

@@ -1,5 +1,5 @@
 import type { GrantInfo, SampleWithUrl, SessionPlan, TokenInfo } from "@jam/shared";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { AccountSection } from "@/features/auth/AccountSection";
 import type { Profile } from "@/features/auth/authContext";
@@ -7,6 +7,10 @@ import { ConnectSection } from "@/features/connect/ConnectSection";
 import { LibrarySection } from "@/features/library/LibrarySection";
 import { PlanSection } from "@/features/plan/PlanSection";
 import type { PrepHandle } from "@/features/prep/usePrep";
+import { soundCount, type SoundItem } from "@/features/sounds/catalog";
+import { SoundsSection } from "@/features/sounds/SoundsSection";
+import { useSoundCatalog } from "@/features/sounds/useSoundCatalog";
+import { useLocalStorageFlag } from "@/hooks/useLocalStorage";
 import { PanelCard } from "./PanelCard";
 
 export interface SidePanelProps {
@@ -26,9 +30,11 @@ export interface SidePanelProps {
   onUploadSample: (file: File) => void;
   onDeleteSample: (id: string) => void;
   prep?: PrepHandle;
+  /** Inserts a sound at the editor's cursor. False when the editor is not ready. */
+  onInsertSound?: (item: SoundItem) => boolean;
 }
 
-const count = (n: number, one: string, many: string) => (n === 1 ? `1 ${one}` : `${n} ${many}`);
+const count = (n: number, one: string, many: string) => (n === 1 ? `1 ${one}` : `${n.toLocaleString()} ${many}`);
 
 export function SidePanel(props: SidePanelProps) {
   const { profile, plan, tokens, freshToken, grants } = props;
@@ -39,6 +45,11 @@ export function SidePanel(props: SidePanelProps) {
   const connectOpen = manual && manual.forToken === freshToken ? manual.open : autoOpen;
   const setConnectOpen = (open: boolean) => setManual({ forToken: freshToken, open });
 
+  const yours = useMemo(() => props.samples.map((s) => s.name), [props.samples]);
+  const sounds = useSoundCatalog(yours);
+  const [soundsOpen, setSoundsOpen] = useLocalStorageFlag("jam:sounds", true);
+  const soundsMeta = sounds.source === "loading" ? "Loading" : count(soundCount(sounds.catalog), "sound", "sounds");
+
   const connected = tokens.length + grants.length;
   const planMeta = plan
     ? plan.currentStage >= plan.stages.length
@@ -48,10 +59,18 @@ export function SidePanel(props: SidePanelProps) {
 
   return (
     <aside className="h-full min-h-0 border-hairline bg-background md:border-l" aria-label="Side panel">
-      <ScrollArea className="h-full">
+      {/* Radix wraps the content in a display: table box that grows with long names; keep it to the panel width. */}
+      <ScrollArea className="h-full [&_[data-slot=scroll-area-viewport]>div]:!block">
         <div className="flex min-h-full flex-col divide-y divide-hairline px-4 pt-4 md:px-5">
           <PanelCard title="Today we paint" coach meta={planMeta}>
             <PlanSection plan={plan} signedIn={!!profile} />
+          </PanelCard>
+          <PanelCard title="Sounds" meta={soundsMeta} open={soundsOpen} onOpenChange={setSoundsOpen}>
+            <SoundsSection
+              catalog={sounds.catalog}
+              source={sounds.source}
+              onInsert={props.onInsertSound ?? (() => false)}
+            />
           </PanelCard>
           <PanelCard title="Library" meta={profile ? count(props.samples.length, "sample", "samples") : undefined}>
             <LibrarySection

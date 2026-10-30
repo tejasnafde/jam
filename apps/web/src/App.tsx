@@ -1,4 +1,5 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { SaveStatus } from "@/components/SaveStatus";
 import { SidePanel, type SidePanelProps } from "@/components/SidePanel";
 import { TopBar } from "@/components/TopBar";
@@ -8,12 +9,14 @@ import { Booth } from "@/features/booth/Booth";
 import { UserAvatar } from "@/features/auth/UserAvatar";
 import { useGrants } from "@/features/connect/useGrants";
 import { useTokens } from "@/features/connect/useTokens";
+import { sortDroppedFiles } from "@/features/library/sampleFile";
 import { useSamples } from "@/features/library/useSamples";
 import { EditorPane } from "@/features/editor/EditorPane";
 import type { StrudelEditorHandle } from "@/features/editor/StrudelEditor";
 import type { SaveStatus as Status } from "@/features/editor/useEvaluationRecorder";
 import { usePlan } from "@/features/plan/usePlan";
 import { usePrep } from "@/features/prep/usePrep";
+import { preventFileNavigation } from "@/features/sounds/dragState";
 import { useLocalStorageFlag } from "@/hooks/useLocalStorage";
 import { cn } from "@/lib/utils";
 
@@ -33,8 +36,16 @@ export function App({ panelOverride }: { panelOverride?: PanelOverride }) {
   const editor = useRef<StrudelEditorHandle | null>(null);
   const [playing, setPlaying] = useState(false);
   const [panelOpen, setPanelOpen] = useLocalStorageFlag("jam:panel", true);
+  const [live, setLive] = useLocalStorageFlag("jam:live", false);
   const [status, setStatus] = useState<{ value: Status; stamp: number }>({ value: "idle", stamp: 0 });
   const onSaveStatus = useCallback((value: Status) => setStatus({ value, stamp: Date.now() }), []);
+  // A file dropped a few pixels off the editor or the Library must not replace the page.
+  useEffect(() => preventFileNavigation(window), []);
+
+  const insertSound = useCallback<NonNullable<SidePanelProps["onInsertSound"]>>(
+    (item) => editor.current?.insertSound(item) ?? false,
+    [],
+  );
 
   const panel: SidePanelProps = {
     profile: auth.profile,
@@ -54,6 +65,19 @@ export function App({ panelOverride }: { panelOverride?: PanelOverride }) {
     onDeleteSample: (id) => void library.remove(id),
     prep,
     ...panelOverride,
+  };
+
+  /** Audio files dropped on the editor: the same checks and upload as the Library, then their names. */
+  const uploadDropped = async (files: File[]): Promise<string[]> => {
+    const { accepted, rejected } = sortDroppedFiles(files);
+    for (const r of rejected) toast.error(`${r.name} ${r.reason}.`);
+    if (!accepted.length) return [];
+    if (!auth.profile) {
+      toast("Sign in to keep your own samples.");
+      return [];
+    }
+    const names = await Promise.all(accepted.map((f) => library.upload(f)));
+    return names.filter((n): n is string => !!n);
   };
 
   const togglePlay = () => void (playing ? editor.current?.stop() : editor.current?.play());
@@ -79,6 +103,11 @@ export function App({ panelOverride }: { panelOverride?: PanelOverride }) {
       <TopBar
         playing={playing}
         onTogglePlay={togglePlay}
+        live={live}
+        onLiveChange={(on) => {
+          setLive(on);
+          if (on && !playing) toast("Live is on. Press play, and the music follows your typing.");
+        }}
         panelOpen={panelOpen}
         onTogglePanel={() => setPanelOpen(!panelOpen)}
         status={<SaveStatus status={status.value} stamp={status.stamp} />}
@@ -92,10 +121,16 @@ export function App({ panelOverride }: { panelOverride?: PanelOverride }) {
         )}
       >
         <div className="flex min-h-0 flex-col max-md:h-[60vh] max-md:min-h-80 max-md:border-b max-md:border-border">
-          <EditorPane editorRef={editor} onPlayingChange={setPlaying} onSaveStatus={onSaveStatus} />
+          <EditorPane
+            editorRef={editor}
+            onPlayingChange={setPlaying}
+            onSaveStatus={onSaveStatus}
+            live={live}
+            onDropFiles={uploadDropped}
+          />
         </div>
         <div className={cn("min-h-0 md:h-full", !panelOpen && "md:hidden")}>
-          <SidePanel {...panel} />
+          <SidePanel {...panel} onInsertSound={insertSound} />
         </div>
       </main>
     </div>

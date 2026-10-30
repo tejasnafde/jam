@@ -234,3 +234,16 @@ kbd.jam-kbd {
   color: var(--muted-foreground);
   background: var(--well);
 }
+
+/* "Go to line": the line glows oil for a moment, then fades. */
+@keyframes jam-line-flash {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+.jam-line-flash {
+  animation: jam-line-flash 1.4s ease-out forwards;
+}

@@ -1,11 +1,13 @@
 import type { SampleWithUrl } from "@jam/shared";
 import { Check, Copy, Loader2, Play, Square, Trash2, Upload } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type DragEvent } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { PrepMenu, PrepStatusBadge } from "@/features/prep/PrepMenu";
 import { isPrepActive, type PrepHandle } from "@/features/prep/usePrep";
 import { cn } from "@/lib/utils";
-import { sampleFacts } from "./sampleFile";
+import { hasFiles } from "@/features/sounds/dragState";
+import { sampleFacts, sortDroppedFiles } from "./sampleFile";
 
 interface Props {
   signedIn: boolean;
@@ -116,6 +118,7 @@ export function LibrarySection({ signedIn, samples, uploading, onUpload, onDelet
   const input = useRef<HTMLInputElement>(null);
   const audio = useRef<HTMLAudioElement | null>(null);
   const [playingId, setPlayingId] = useState<string | null>(null);
+  const [dropping, setDropping] = useState(false);
 
   useEffect(() => () => audio.current?.pause(), []);
 
@@ -126,6 +129,30 @@ export function LibrarySection({ signedIn, samples, uploading, onUpload, onDelet
       </p>
     );
   }
+
+  // Files dropped from the desktop go through the same upload as the button: mp3 or wav, 50 MB at most.
+  const uploadAll = (files: Iterable<File>) => {
+    const { accepted, rejected } = sortDroppedFiles(files);
+    for (const r of rejected) toast.error(`${r.name} ${r.reason}.`);
+    for (const f of accepted) onUpload(f);
+  };
+  const dropProps = {
+    onDragOver: (e: DragEvent) => {
+      if (!hasFiles(e.dataTransfer)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
+      setDropping(true);
+    },
+    onDragLeave: (e: DragEvent) => {
+      if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropping(false);
+    },
+    onDrop: (e: DragEvent) => {
+      if (!hasFiles(e.dataTransfer)) return;
+      e.preventDefault();
+      setDropping(false);
+      uploadAll(e.dataTransfer.files);
+    },
+  };
 
   const stop = () => {
     audio.current?.pause();
@@ -150,7 +177,19 @@ export function LibrarySection({ signedIn, samples, uploading, onUpload, onDelet
   };
 
   return (
-    <div className="flex flex-col gap-3">
+    <div
+      {...dropProps}
+      data-testid="library-drop"
+      className={cn(
+        "relative -mx-2 flex flex-col gap-3 rounded-lg px-2 pb-2 outline-dashed outline-[1.5px] outline-transparent transition-colors",
+        dropping && "bg-oil/5 outline-oil",
+      )}
+    >
+      {dropping && (
+        <p className="pointer-events-none absolute inset-x-0 top-1/2 z-10 -translate-y-1/2 text-center text-sm font-medium text-oil">
+          Drop mp3 or wav to upload
+        </p>
+      )}
       {samples.length === 0 ? (
         <p className="text-sm leading-relaxed text-muted-foreground">
           Nothing here yet. Upload a song or a sound, then play it with{" "}
@@ -174,12 +213,13 @@ export function LibrarySection({ signedIn, samples, uploading, onUpload, onDelet
         ref={input}
         type="file"
         accept=".mp3,.wav,audio/mpeg,audio/wav"
+        multiple
         className="hidden"
         aria-label="Audio file"
         onChange={(e) => {
-          const file = e.target.files?.[0];
+          const files = [...(e.target.files ?? [])];
           e.target.value = "";
-          if (file) onUpload(file);
+          uploadAll(files);
         }}
       />
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -187,7 +227,7 @@ export function LibrarySection({ signedIn, samples, uploading, onUpload, onDelet
           {uploading ? <Loader2 className="animate-spin" /> : <Upload />}
           {uploading ? "Uploading" : "Upload audio"}
         </Button>
-        <span className="text-xs text-muted-foreground">mp3 or wav, up to 50 MB</span>
+        <span className="text-xs text-muted-foreground">mp3 or wav, up to 50 MB. Or drop files here.</span>
       </div>
     </div>
   );
