@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { SaveStatus } from "@/components/SaveStatus";
 import { SidePanel, type SidePanelProps } from "@/components/SidePanel";
@@ -16,6 +16,7 @@ import type { StrudelEditorHandle } from "@/features/editor/StrudelEditor";
 import type { SaveStatus as Status } from "@/features/editor/useEvaluationRecorder";
 import { usePlan } from "@/features/plan/usePlan";
 import { usePrep } from "@/features/prep/usePrep";
+import { preventFileNavigation } from "@/features/sounds/dragState";
 import { useLocalStorageFlag } from "@/hooks/useLocalStorage";
 import { cn } from "@/lib/utils";
 
@@ -38,6 +39,8 @@ export function App({ panelOverride }: { panelOverride?: PanelOverride }) {
   const [live, setLive] = useLocalStorageFlag("jam:live", false);
   const [status, setStatus] = useState<{ value: Status; stamp: number }>({ value: "idle", stamp: 0 });
   const onSaveStatus = useCallback((value: Status) => setStatus({ value, stamp: Date.now() }), []);
+  // A file dropped a few pixels off the editor or the Library must not replace the page.
+  useEffect(() => preventFileNavigation(window), []);
 
   const insertSound = useCallback<NonNullable<SidePanelProps["onInsertSound"]>>(
     (item) => editor.current?.insertSound(item) ?? false,
@@ -101,7 +104,10 @@ export function App({ panelOverride }: { panelOverride?: PanelOverride }) {
         playing={playing}
         onTogglePlay={togglePlay}
         live={live}
-        onLiveChange={setLive}
+        onLiveChange={(on) => {
+          setLive(on);
+          if (on && !playing) toast("Live is on. Press play, and the music follows your typing.");
+        }}
         panelOpen={panelOpen}
         onTogglePanel={() => setPanelOpen(!panelOpen)}
         status={<SaveStatus status={status.value} stamp={status.stamp} />}

@@ -65,15 +65,35 @@ describe("insertion", () => {
 
   it("inserts the full snippet outside a string", () => {
     expect(drop("$: |", bd)).toBe('$: s("bd").bank("RolandTR909")');
-    expect(drop("|", flute)).toBe('note("c3").s("gm_flute")');
+    expect(drop("|", flute)).toBe('$: note("c3").s("gm_flute")');
     expect(drop("stack(|)", casio)).toBe('stack(s("casio"))');
+  });
+
+  it("starts a $: pattern on a blank line, so the snippet plays next to the other $: patterns", () => {
+    const code = '$: s("hh*4")\n\n|\n$: note("c2")';
+    expect(drop(code, bd)).toBe('$: s("hh*4")\n\n$: s("bd").bank("RolandTR909")\n$: note("c2")');
+    expect(drop('$: s("hh*4")\n  |', casio)).toBe('$: s("hh*4")\n  $: s("casio")');
+    expect(drop('drums: s("hh*4")\n|', casio)).toBe('drums: s("hh*4")\n$: s("casio")');
+    // Without labels, Strudel plays the last expression: a bare snippet is right.
+    expect(drop("// my jam\n|", casio)).toBe('// my jam\ns("casio")');
+    expect(drop('s("hh*4")\n|', casio)).toBe('s("hh*4")\ns("casio")');
+  });
+
+  it("puts a name only into s(), sound() and n() strings, and a new line under any other string", () => {
+    expect(drop('$: note("hh").sound("bd |")', casio)).toBe('$: note("hh").sound("bd casio")');
+    expect(drop('$: n( "0 |")', casio)).toBe('$: n( "0 casio")');
+    expect(drop('$: note("<c2 |eb2>").s("saw")', bd)).toBe(
+      '$: note("<c2 eb2>").s("saw")\n$: s("bd").bank("RolandTR909")',
+    );
+    expect(drop('s("bd").bank("Roland|TR909")\nx', casio)).toBe('s("bd").bank("RolandTR909")\ns("casio")\nx');
   });
 
   it("inserts several dropped files: spaces in a string, lines outside", () => {
     const a: SoundItem = { kind: "yours", name: "a1", key: "a1" };
     const b: SoundItem = { kind: "yours", name: "b2", key: "b2" };
     expect(insertionForAll('s("bd")', 5, [a, b]).text).toBe(" a1 b2");
-    expect(insertionForAll("", 0, [a, b]).text).toBe('s("a1")\ns("b2")');
+    expect(insertionForAll("", 0, [a, b]).text).toBe('$: s("a1")\n$: s("b2")');
+    expect(insertionForAll('$: s("bd")\n', 11, [a, b]).text).toBe('$: s("a1")\n$: s("b2")');
     expect(insertionForAll("", 9, [a]).from).toBe(0);
   });
 });

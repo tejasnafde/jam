@@ -3,6 +3,7 @@ import type { SoundItem } from "@/features/sounds/catalog";
 import { draggedSound, hasFiles, hasSound, soundFromDrop } from "@/features/sounds/dragState";
 import { insertionFor, insertionForAll } from "@/features/sounds/snippet";
 import { installAudioTap } from "@/lib/audio";
+import { serial } from "./live";
 import type { EditorViewLike, StrudelEditorElement, StrudelMirror, StrudelState } from "./strudelTypes";
 
 export interface StrudelEditorHandle {
@@ -73,6 +74,8 @@ export function StrudelEditor({ initialCode, onEvaluated, onStateChange, onLoadE
   const initialCodeRef = useRef(initialCode);
   const [caret, setCaret] = useState<Caret | null>(null);
   const [flash, setFlash] = useState<{ top: number; height: number; key: number } | null>(null);
+  // Quiet evaluations (Live and its revert) run one at a time, so each one reports its result.
+  const [queue] = useState(serial);
 
   const view = () => mirrorRef.current?.editor ?? null;
 
@@ -82,7 +85,7 @@ export function StrudelEditor({ initialCode, onEvaluated, onStateChange, onLoadE
     setCode: (code) => mirrorRef.current?.setCode(code),
     getCps: () => mirrorRef.current?.repl?.scheduler?.cps ?? null,
     getCode: () => mirrorRef.current?.code ?? null,
-    evaluateQuiet: async (code) => void (await mirrorRef.current?.repl?.evaluate?.(code, false)),
+    evaluateQuiet: (code) => queue(async () => void (await mirrorRef.current?.repl?.evaluate?.(code, false))),
     goToLine: (line) => {
       const v = view();
       const host = hostRef.current;
@@ -147,13 +150,12 @@ export function StrudelEditor({ initialCode, onEvaluated, onStateChange, onLoadE
     const pos = v.posAtCoords({ x: e.clientX, y: e.clientY }, false);
     const item = draggedSound();
     // The caret shows where the text will really go: a drop inside a step moves to the step's end.
-    const ins = item
-      ? insertionFor(v.state.doc.toString(), pos, item)
-      : { from: pos, text: "Upload, then insert s(...)" };
+    // Files have no name yet, so their label shows the shape of what goes in.
+    const ins = insertionFor(v.state.doc.toString(), pos, item ?? { kind: "yours", name: "...", key: "" });
     const at = v.coordsAtPos(ins.from);
     if (!at) return setCaret(null);
     const box = host.getBoundingClientRect();
-    const label = ins.text.trim();
+    const label = item ? ins.text.trim() : `Upload, then insert ${ins.text.trim()}`;
     setCaret({ left: at.left - box.left, top: at.top - box.top, height: at.bottom - at.top, label });
   };
 
