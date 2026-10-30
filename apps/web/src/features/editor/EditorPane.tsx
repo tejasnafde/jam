@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { useAuth } from "@/features/auth/authContext";
 import { DEFAULT_CODE, LOCAL_CODE_KEY } from "./defaultCode";
 import { EvalNote } from "./EvalNote";
+import { LiveController, VersionCoalescer } from "./live";
 import { StrudelEditor, type StrudelEditorHandle } from "./StrudelEditor";
 import type { StrudelState } from "./strudelTypes";
 import { useEvaluationRecorder, type SaveStatus } from "./useEvaluationRecorder";
@@ -11,16 +12,58 @@ interface Props {
   editorRef: RefObject<StrudelEditorHandle | null>;
   onPlayingChange: (playing: boolean) => void;
   onSaveStatus: (status: SaveStatus) => void;
+  /** Live mode: evaluate after a pause in typing, while the music plays. */
+  live?: boolean;
+  /** Uploads audio files dropped on the editor. Resolves to the new sample names. */
+  onDropFiles?: (files: File[]) => Promise<string[]>;
 }
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
-export function EditorPane({ editorRef, onPlayingChange, onSaveStatus }: Props) {
+export function EditorPane({ editorRef, onPlayingChange, onSaveStatus, live = false, onDropFiles }: Props) {
   const { api } = useAuth();
   const [note, setNote] = useState<string | null>(null);
+  // A runtime error that Live mode took back: the music went back to the last good code,
+  // but the user still needs to see what went wrong, until the next good evaluation.
+  const [liveNote, setLiveNote] = useState<string | null>(null);
   const playing = useRef(false);
+  const liveRef = useRef(live);
+  const lastCode = useRef<string | null>(null);
+  // The code a Live revert put back, until its evaluation reports.
+  const reverting = useRef<string | null>(null);
 
   const record = useEvaluationRecorder(api, () => playing.current, onSaveStatus);
+  const recordRef = useRef(record);
+  useLayoutEffect(() => {
+    recordRef.current = record;
+    liveRef.current = live;
+  });
+
+  // Built once the editor is mounted: the controller evaluates through the editor handle.
+  const liveMode = useRef<{ controller: LiveController; versions: VersionCoalescer } | null>(null);
+  useEffect(() => {
+    const versions = new VersionCoalescer((code) => void recordRef.current(code));
+    const controller = new LiveController({
+      evaluate: (code) => void editorRef.current?.evaluateQuiet(code),
+      revert: (code) => {
+        reverting.current = code;
+        void editorRef.current?.evaluateQuiet(code);
+      },
+    });
+    liveMode.current = { controller, versions };
+    return () => {
+      controller.cancel();
+      versions.dispose();
+      liveMode.current = null;
+    };
+  }, [editorRef]);
+  useEffect(() => {
+    const controller = liveMode.current?.controller;
+    if (!live) return controller?.cancel();
+    // Edits made before Live was switched on count too: the music catches up after the usual pause.
+    const code = editorRef.current?.getCode();
+    if (code && playing.current) controller?.onEdit(code, { enabled: true, playing: true });
+  }, [live, editorRef]);
 
   const onStateChange = useCallback(
     (s: StrudelState) => {
@@ -28,19 +71,39 @@ export function EditorPane({ editorRef, onPlayingChange, onSaveStatus }: Props) 
         playing.current = s.started;
         onPlayingChange(s.started);
       }
-      if (s.code && s.code !== "// LOADING") localStorage.setItem(LOCAL_CODE_KEY, s.code);
+      // The editor's own text: a Live revert evaluates older code without changing what the user wrote.
+      const code = editorRef.current?.getCode() ?? s.code;
+      const controller = liveMode.current?.controller;
+      controller?.onPlayingChange(s.started);
+      if (code && code !== "// LOADING") {
+        localStorage.setItem(LOCAL_CODE_KEY, code);
+        if (code !== lastCode.current) {
+          lastCode.current = code;
+          controller?.onEdit(code, { enabled: liveRef.current, playing: s.started });
+        }
+      }
+      if (s.schedulerError && controller?.onSchedulerError(s.activeCode)) setLiveNote(errorText(s.schedulerError));
       const err = s.evalError ?? s.schedulerError;
       setNote(err ? errorText(err) : null);
     },
-    [onPlayingChange],
+    [onPlayingChange, editorRef],
   );
 
-  const onEvaluated = useCallback(
-    (s: StrudelState) => {
-      if (!s.evalError) void record(s.activeCode);
-    },
-    [record],
-  );
+  const onEvaluated = useCallback((s: StrudelState) => {
+    if (reverting.current !== null && s.activeCode === reverting.current) {
+      reverting.current = null;
+      return;
+    }
+    const mode = liveMode.current;
+    if (!mode) return;
+    const { controller, versions } = mode;
+    if (s.evalError) return controller.onEvalError(s.code);
+    const wasLive = controller.evaluatingLive;
+    controller.onEvaluated(s.activeCode);
+    setLiveNote(null);
+    if (wasLive) versions.live(s.activeCode);
+    else versions.explicit(s.activeCode);
+  }, []);
 
   // Bring back the last saved jam on sign-in, unless the user already has their own code here.
   useEffect(() => {
@@ -54,17 +117,18 @@ export function EditorPane({ editorRef, onPlayingChange, onSaveStatus }: Props) 
   }, [api, editorRef]);
 
   return (
-    <section className="relative flex min-h-0 min-w-0 flex-col" aria-label="Code editor">
+    <section className="relative flex min-h-0 min-w-0 flex-1 flex-col" aria-label="Code editor">
       <div className="editor-wrap min-h-0 flex-1 overflow-auto">
         <StrudelEditor
           ref={editorRef}
           initialCode={localStorage.getItem(LOCAL_CODE_KEY) ?? DEFAULT_CODE}
           onEvaluated={onEvaluated}
           onStateChange={onStateChange}
+          onDropFiles={onDropFiles}
           onLoadError={(err) => setNote(`The editor did not load (${err.message}). Reload the page to try again.`)}
         />
       </div>
-      <EvalNote message={note} />
+      <EvalNote message={note ?? liveNote} onGoToLine={(line) => editorRef.current?.goToLine(line)} />
     </section>
   );
 }

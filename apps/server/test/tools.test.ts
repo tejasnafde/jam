@@ -100,6 +100,14 @@ describe("lookup_sound", () => {
     expect(saw.results[0]?.kind).toBe("synth");
   });
 
+  it("finds drum parts by a plain word from the shared alias table", async () => {
+    const { mintFor, callTool } = setup();
+    const kick = jsonOf<{ results: { name: string }[] }>(
+      await callTool(await mintFor("alice"), "lookup_sound", { query: "kick" }),
+    );
+    expect(kick.results.map((r) => r.name).sort()).toEqual(["RolandTR808_bd", "bd"]);
+  });
+
   it("says when nothing matches", async () => {
     const { mintFor, callTool } = setup();
     expect(textOf(await callTool(await mintFor("alice"), "lookup_sound", { query: "zzzqqq" }))).toMatch(/No default/);

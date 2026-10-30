@@ -4,6 +4,7 @@
 // prebake step. They are fetched once per instance and cached in memory. The
 // cache is only a cache: losing it costs one refetch, not user data.
 
+import { aliasTargets } from "@jam/shared";
 import gmSounds from "./gm-sounds.json" with { type: "json" };
 
 const DOUGH = "https://raw.githubusercontent.com/felixroos/dough-samples/main";
@@ -118,14 +119,25 @@ export class SoundIndex {
     return out;
   }
 
-  /** Case-insensitive substring search. Exact and prefix matches sort first. */
+  /** Every entry, for the web page's fallback list when it cannot read Strudel's own map. */
+  all(): Promise<SoundEntry[]> {
+    return this.load();
+  }
+
+  /**
+   * Case-insensitive substring search. Exact and prefix matches sort first.
+   * Plain words match through the shared alias table: "kick" finds bd, "hat" finds hh and oh.
+   */
   async search(query: string, limit = 25): Promise<{ total: number; results: SoundEntry[] }> {
     const q = query.trim().toLowerCase();
+    const targets = new Set(aliasTargets(q));
     const all = await this.load();
-    const hits = all.filter((e) => e.name.toLowerCase().includes(q) || e.usage.toLowerCase().includes(q));
+    const partOf = (e: SoundEntry) => (e.kind === "drum-machine" ? e.name.slice(e.name.lastIndexOf("_") + 1) : e.name);
+    const aliased = (e: SoundEntry) => targets.has(partOf(e).toLowerCase());
+    const hits = all.filter((e) => e.name.toLowerCase().includes(q) || e.usage.toLowerCase().includes(q) || aliased(e));
     const rank = (e: SoundEntry) => {
       const n = e.name.toLowerCase();
-      return n === q ? 0 : n.startsWith(q) ? 1 : 2;
+      return n === q ? 0 : n.startsWith(q) || targets.has(n) ? 1 : 2;
     };
     hits.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
     return { total: hits.length, results: hits.slice(0, limit) };
