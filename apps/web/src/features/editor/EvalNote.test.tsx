@@ -31,6 +31,16 @@ describe("EvalNote", () => {
     expect(screen.getByRole("status")).toHaveTextContent("two");
   });
 
+  it("shows a dismissed error again after it was fixed and came back", async () => {
+    const { rerender } = render(<EvalNote message="sd is not defined" />);
+    await userEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    rerender(<EvalNote message="sd is not defined" />);
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    rerender(<EvalNote message={null} />);
+    rerender(<EvalNote message="sd is not defined" />);
+    expect(screen.getByRole("status")).toHaveTextContent("sd is not defined");
+  });
+
   it("reads line numbers from the error text", () => {
     expect(errorLine("[mini] parse error at line 3: expected ]")).toBe(3);
     expect(errorLine("SyntaxError: Unexpected token (12:4)")).toBe(12);

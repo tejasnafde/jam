@@ -1,7 +1,8 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { buildCatalog, type RawSound } from "./catalog";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { buildCatalog, type Catalog, type RawSound } from "./catalog";
 import { SOUND_MIME } from "./dragState";
 import { SoundsSection } from "./SoundsSection";
 
@@ -15,9 +16,13 @@ const raw: RawSound[] = [
 ];
 const catalog = buildCatalog(raw, ["my_loop"]);
 
-function setup() {
+function setup(c: Catalog = catalog) {
   const onInsert = vi.fn(() => true);
-  render(<SoundsSection catalog={catalog} source="strudel" onInsert={onInsert} />);
+  render(
+    <TooltipProvider>
+      <SoundsSection catalog={c} source="strudel" onInsert={onInsert} />
+    </TooltipProvider>,
+  );
   return { onInsert, user: userEvent.setup() };
 }
 
@@ -85,5 +90,40 @@ describe("SoundsSection", () => {
     fireEvent.dragStart(row, { dataTransfer });
     expect(data.get("text/plain")).toBe('note("c3").s("sawtooth")');
     expect(JSON.parse(data.get(SOUND_MIME) ?? "{}")).toMatchObject({ kind: "synth", name: "sawtooth" });
+  });
+
+  it("names the matched parts on each closed machine when a search hits many machines", async () => {
+    const many = buildCatalog(
+      Array.from({ length: 8 }, (_, i): RawSound[] => [
+        { key: `m${i}_bd`, type: "sample", drum: { machine: `M${i}`, part: "bd" } },
+        { key: `m${i}_sd`, type: "sample", drum: { machine: `M${i}`, part: "sd" } },
+      ]).flat(),
+      [],
+    );
+    const { user } = setup(many);
+    expect(screen.queryByRole("button", { name: /M0/ })).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText("Search sounds"), "kick");
+    const machine = screen.getByRole("button", { name: "M0, bd" });
+    expect(machine).toHaveAttribute("aria-expanded", "false");
+    await user.clear(screen.getByLabelText("Search sounds"));
+    await user.click(screen.getByRole("button", { name: "Drum machines, 8" }));
+    expect(screen.getByRole("button", { name: "M0, 2 parts" })).toBeInTheDocument();
+  });
+
+  it("names the insert and copy buttons in a tooltip", async () => {
+    // jsdom has no ResizeObserver; the tooltip measures its arrow with one.
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    const { user } = setup();
+    await user.click(screen.getByRole("button", { name: "Synths, 1" }));
+    await user.hover(screen.getByRole("button", { name: 'Insert note("c3").s("sawtooth") at cursor' }));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Insert at cursor");
+    vi.unstubAllGlobals();
   });
 });
