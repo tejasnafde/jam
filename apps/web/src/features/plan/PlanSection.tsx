@@ -107,7 +107,7 @@ export function PlanSection({ plan, signedIn }: Props) {
       </ol>
       {plan.note && (
         <p className="text-sm leading-snug text-water">
-          <span className="mr-1.5 font-semibold">Coach:</span>
+          <span className="mr-1.5 font-semibold">Stage note:</span>
           {plan.note}
         </p>
       )}

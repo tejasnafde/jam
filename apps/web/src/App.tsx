@@ -14,6 +14,7 @@ import { useSamples } from "@/features/library/useSamples";
 import { EditorPane, type EditorControl } from "@/features/editor/EditorPane";
 import type { StrudelEditorHandle } from "@/features/editor/StrudelEditor";
 import type { SaveStatus as Status } from "@/features/editor/useEvaluationRecorder";
+import { useCoach } from "@/features/coach/useCoach";
 import { usePlan } from "@/features/plan/usePlan";
 import { usePrep } from "@/features/prep/usePrep";
 import { SessionName } from "@/features/sessions/SessionName";
@@ -47,8 +48,14 @@ export function App({ panelOverride }: { panelOverride?: PanelOverride }) {
   );
   const sessions = useSessions(auth.api, bridge);
   const { refresh: refreshSessions } = sessions;
-  const onVersionSaved = useCallback(() => void refreshSessions().catch(console.error), [refreshSessions]);
   const plan = usePlan(auth.api, sessions.handle.currentId);
+  const coach = useCoach(auth.api, sessions.handle.currentId);
+  const { refresh: refreshCoach } = coach;
+  // A run can add a coach check-in, so the thread is checked at once too.
+  const onVersionSaved = useCallback(() => {
+    void refreshSessions().catch(console.error);
+    void refreshCoach().catch(console.error);
+  }, [refreshSessions, refreshCoach]);
   const [playing, setPlaying] = useState(false);
   const [panelOpen, setPanelOpen] = useLocalStorageFlag("jam:panel", true);
   const [live, setLive] = useLocalStorageFlag("jam:live", false);
@@ -80,6 +87,7 @@ export function App({ panelOverride }: { panelOverride?: PanelOverride }) {
     onDeleteSample: (id) => void library.remove(id),
     prep,
     sessions: sessions.handle,
+    coach,
     ...panelOverride,
   };
 

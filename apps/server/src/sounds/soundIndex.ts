@@ -25,6 +25,7 @@ export const SYNTHS = [
   "triangle",
   "square",
   "sawtooth",
+  "one",
   "supersaw",
   "pulse",
   "sbd",
@@ -42,12 +43,23 @@ export const SYNTHS = [
   "z_noise",
 ];
 
+// Short names superdough maps to a waveform (synth.mjs waveformAliases). They play in the
+// browser, so lookup_sound must know them.
+export const SYNTH_ALIASES: Readonly<Record<string, string>> = {
+  tri: "triangle",
+  sqr: "square",
+  saw: "sawtooth",
+  sin: "sine",
+};
+
 export interface SoundEntry {
   name: string;
   kind: "synth" | "soundfont" | "sample" | "drum-machine";
   source: string;
   variants?: number;
   usage: string;
+  /** For a short name: the sound it plays. */
+  aliasOf?: string;
 }
 
 export type Fetcher = (url: string) => Promise<unknown>;
@@ -75,6 +87,9 @@ export class SoundIndex {
   private async build(): Promise<SoundEntry[]> {
     const out: SoundEntry[] = [];
     for (const s of SYNTHS) out.push({ name: s, kind: "synth", source: "superdough", usage: `s("${s}")` });
+    for (const [alias, of] of Object.entries(SYNTH_ALIASES)) {
+      out.push({ name: alias, kind: "synth", source: "superdough", usage: `s("${alias}")`, aliasOf: of });
+    }
     for (const s of gmSounds as string[]) {
       out.push({ name: s, kind: "soundfont", source: "gm soundfonts", usage: `s("${s}")` });
     }

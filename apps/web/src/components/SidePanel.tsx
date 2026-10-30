@@ -3,6 +3,8 @@ import { useMemo, useState } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { AccountSection } from "@/features/auth/AccountSection";
 import type { Profile } from "@/features/auth/authContext";
+import { CoachSection, CoachStatus } from "@/features/coach/CoachSection";
+import type { CoachHandle } from "@/features/coach/useCoach";
 import { ConnectSection } from "@/features/connect/ConnectSection";
 import { LibrarySection } from "@/features/library/LibrarySection";
 import { PlanSection } from "@/features/plan/PlanSection";
@@ -33,6 +35,7 @@ export interface SidePanelProps {
   onDeleteSample: (id: string) => void;
   prep?: PrepHandle;
   sessions?: SessionsHandle;
+  coach?: CoachHandle;
   /** Inserts a sound at the editor's cursor. False when the editor is not ready. */
   onInsertSound?: (item: SoundItem) => boolean;
 }
@@ -53,6 +56,7 @@ export function SidePanel(props: SidePanelProps) {
   const [soundsOpen, setSoundsOpen] = useLocalStorageFlag("jam:sounds", true);
   const soundsMeta = sounds.source === "loading" ? "Loading" : count(soundCount(sounds.catalog), "sound", "sounds");
 
+  const [coachOpen, setCoachOpen] = useLocalStorageFlag("jam:coach", true);
   const [sessionsOpen, setSessionsOpen] = useLocalStorageFlag("jam:sessions", true);
   const sessionCount = props.sessions?.sessions.length ?? 0;
 
@@ -71,6 +75,17 @@ export function SidePanel(props: SidePanelProps) {
           <PanelCard title="Today we paint" coach meta={planMeta}>
             <PlanSection plan={plan} signedIn={!!profile} />
           </PanelCard>
+          {props.coach && (
+            <PanelCard
+              title="Coach"
+              coach
+              meta={profile ? <CoachStatus coach={props.coach} /> : undefined}
+              open={coachOpen}
+              onOpenChange={setCoachOpen}
+            >
+              <CoachSection signedIn={!!profile} coach={props.coach} />
+            </PanelCard>
+          )}
           {props.sessions && (
             <PanelCard
               title="Sessions"
