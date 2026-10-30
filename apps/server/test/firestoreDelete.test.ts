@@ -45,10 +45,15 @@ function fakeDb(failBatch: boolean) {
 }
 
 describe("FirestoreStore.deleteSession", () => {
-  it("deletes the versions and plans first and the session doc last", async () => {
+  it("deletes the versions, plans and coach thread first and the session doc last", async () => {
     const { db, deleted } = fakeDb(false);
     expect(await new FirestoreStore(db).deleteSession("alice", "s1")).toBe(true);
-    expect(deleted).toEqual(["users/alice/versions/child", "users/alice/plans/child", "users/alice/sessions/s1"]);
+    expect(deleted).toEqual([
+      "users/alice/versions/child",
+      "users/alice/plans/child",
+      "users/alice/sessions/s1/coachEvents/child",
+      "users/alice/sessions/s1",
+    ]);
   });
 
   it("keeps the session when deleting its versions fails, so the user can delete it again", async () => {

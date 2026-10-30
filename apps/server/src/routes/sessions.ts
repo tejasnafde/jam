@@ -1,9 +1,12 @@
 import {
+  askCoachRequestSchema,
+  COACH_THREAD_MAX,
   createSessionRequestSchema,
   duplicateSessionRequestSchema,
   openSessionRequestSchema,
   reportErrorRequestSchema,
   SessionId,
+  setCadenceRequestSchema,
   summarizeChange,
   updateSessionRequestSchema,
   versionPageQuerySchema,
@@ -25,7 +28,7 @@ function sessionParam(req: Request, res: Response): string | null {
 
 const notFound = (res: Response) => res.status(404).json({ error: "not_found" });
 
-export function sessionsRouter(store: Store) {
+export function sessionsRouter(store: Store, now: () => number) {
   const router = Router();
 
   router.get(
@@ -112,6 +115,54 @@ export function sessionsRouter(store: Store) {
       if (!id || !body) return;
       const saved = await store.setSessionError(pageUser(req).uid, id, { ...body, at: new Date().toISOString() });
       if (!saved) return notFound(res);
+      res.status(204).end();
+    }),
+  );
+
+  // The coach thread: the user's asks, automatic check-ins and the coach's notes.
+  router.get(
+    "/:id/coach",
+    asyncHandler(async (req, res) => {
+      const id = sessionParam(req, res);
+      if (!id) return;
+      const thread = await store.coachThread(pageUser(req).uid, id, COACH_THREAD_MAX, now());
+      if (!thread) return notFound(res);
+      res.json(thread);
+    }),
+  );
+
+  // What the page polls: two small reads. It reads the thread only when updatedAt moves.
+  router.get(
+    "/:id/coach/status",
+    asyncHandler(async (req, res) => {
+      const id = sessionParam(req, res);
+      if (!id) return;
+      const status = await store.coachStatus(pageUser(req).uid, id, now());
+      if (!status) return notFound(res);
+      res.json(status);
+    }),
+  );
+
+  // An ask for the coach. Empty text is "check my music".
+  router.post(
+    "/:id/coach/asks",
+    asyncHandler(async (req, res) => {
+      const id = sessionParam(req, res);
+      const body = id && parseBody(askCoachRequestSchema, req, res);
+      if (!id || !body) return;
+      const event = await store.addCoachEvent(pageUser(req).uid, id, { kind: "ask", text: body.text }, now());
+      if (!event) return notFound(res);
+      res.status(201).json(event);
+    }),
+  );
+
+  router.put(
+    "/:id/coach/cadence",
+    asyncHandler(async (req, res) => {
+      const id = sessionParam(req, res);
+      const body = id && parseBody(setCadenceRequestSchema, req, res);
+      if (!id || !body) return;
+      if (!(await store.setCoachCadence(pageUser(req).uid, id, body.cadence))) return notFound(res);
       res.status(204).end();
     }),
   );

@@ -1,6 +1,7 @@
 // One MCP server is built per request (stateless Streamable HTTP), scoped to
 // the authenticated user. No tool writes, edits or deletes code; the only
-// writes are to the session plan.
+// writes are to the session plan and the coach thread (say, and the events
+// wait_for_change takes).
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { COACH_RULES } from "./coach.js";
@@ -15,8 +16,10 @@ import { registerGetSessionPlan } from "./tools/getSessionPlan.js";
 import { registerListSamples } from "./tools/listSamples.js";
 import { registerListSessions } from "./tools/listSessions.js";
 import { registerLookupSound } from "./tools/lookupSound.js";
+import { registerSay } from "./tools/say.js";
 import { registerSetSessionPlan } from "./tools/setSessionPlan.js";
 import { registerSetStage } from "./tools/setStage.js";
+import { registerWaitForChange } from "./tools/waitForChange.js";
 
 const TOOLS: Record<string, ToolRegistrar> = {
   get_current_code: registerGetCurrentCode,
@@ -30,6 +33,8 @@ const TOOLS: Record<string, ToolRegistrar> = {
   set_session_plan: registerSetSessionPlan,
   set_stage: registerSetStage,
   get_prep_status: registerGetPrepStatus,
+  wait_for_change: registerWaitForChange,
+  say: registerSay,
 };
 
 export const TOOL_NAMES = Object.keys(TOOLS);

@@ -1,6 +1,9 @@
 // Firestore layout (named database `jam-db`; "jam" is below the 4-character minimum):
-//   users/{uid}                 { email, updatedAt, currentSessionId }
-//   users/{uid}/sessions/{id}   Session (a named piece; "untitled" claims versions from before sessions)
+//   users/{uid}                 { email, updatedAt, currentSessionId, coachListeningAt, coachPageSeenAt }
+//   users/{uid}/sessions/{id}   Session (a named piece; "untitled" claims versions from before sessions),
+//                               with `coach` (CoachCadenceState) once a cadence is set, and
+//                               `coachUpdatedAt` and `coachOpen` once the thread has events
+//   users/{uid}/sessions/{id}/coachEvents/{id}  CoachEvent: asks, check-ins and coach notes
 //   users/{uid}/versions/{id}   CodeVersion, with sessionId
 //   users/{uid}/audio/{id}      AudioSnapshot
 //   users/{uid}/plans/{id}      SessionPlan, with sessionId (a session's planId points at its current plan)
@@ -16,9 +19,16 @@
 // Every other query is a single-field equality or order.
 
 import {
+  advanceCadence,
+  COACH_PAGE_SEEN_WRITE_MS,
+  DEFAULT_CADENCE_STATE,
+  pickCoachEvent,
   UNTITLED_SESSION_ID,
   UNTITLED_SESSION_NAME,
   type AudioSnapshot,
+  type CoachCadence,
+  type CoachCadenceState,
+  type CoachEvent,
   type CodeVersion,
   type PlanInput,
   type Session,
@@ -64,7 +74,11 @@ function withId<T>(doc: DocumentSnapshot): T {
 }
 
 function toSession(doc: DocumentSnapshot): Session {
-  const s = withId<Session>(doc);
+  const s = withId<Session & Record<string, unknown>>(doc);
+  // The coach bookkeeping on the session doc is not part of a Session.
+  delete s.coach;
+  delete s.coachOpen;
+  delete s.coachUpdatedAt;
   return { ...s, versionCount: Number(s.versionCount ?? 0), planId: s.planId ?? null, lastCode: s.lastCode ?? "" };
 }
 
@@ -329,8 +343,13 @@ export class FirestoreStore implements Store {
     // Versions and plans go first, the session last: a half-finished delete leaves a session
     // the user can delete again, never versions without a session that a new one could pick up.
     const user = this.user(uid);
-    for (const name of ["versions", "plans"] as const) {
-      const query = user.collection(name).where("sessionId", "==", id).select().limit(BATCH);
+    const queries = [
+      ...(["versions", "plans"] as const).map((name) =>
+        user.collection(name).where("sessionId", "==", id).select().limit(BATCH),
+      ),
+      this.coachEvents(uid, id).select().limit(BATCH),
+    ];
+    for (const query of queries) {
       for (;;) {
         const snap = await query.get();
         if (snap.empty) break;
@@ -345,6 +364,181 @@ export class FirestoreStore implements Store {
       if (doc.get("currentSessionId") === id) tx.update(user, { currentSessionId: FieldValue.delete() });
     });
     return true;
+  }
+
+  private coachEvents(uid: string, sessionId: string) {
+    return this.sessions(uid).doc(sessionId).collection("coachEvents");
+  }
+
+  /** Records pageSeenAt from a page poll, at most once per COACH_PAGE_SEEN_WRITE_MS. */
+  private async touchPage(uid: string, user: DocumentSnapshot, at: number) {
+    const seen = user.get("coachPageSeenAt") as string | undefined;
+    if (seen && at - Date.parse(seen) < COACH_PAGE_SEEN_WRITE_MS) return;
+    await this.user(uid).set({ coachPageSeenAt: new Date(at).toISOString() }, { merge: true });
+  }
+
+  async coachThread(uid: string, sessionId: string, limit: number, at: number) {
+    const [session, user, snap] = await Promise.all([
+      this.sessions(uid).doc(sessionId).get(),
+      this.user(uid).get(),
+      this.coachEvents(uid, sessionId).orderBy("createdAt", "desc").limit(limit).get(),
+    ]);
+    if (!session.exists) return null;
+    await this.touchPage(uid, user, at);
+    const state = (session.get("coach") as CoachCadenceState | undefined) ?? DEFAULT_CADENCE_STATE;
+    return {
+      events: snap.docs.map((d) => withId<CoachEvent>(d)).reverse(),
+      cadence: state.cadence,
+      listeningAt: (user.get("coachListeningAt") as string | undefined) ?? null,
+      updatedAt: (session.get("coachUpdatedAt") as string | undefined) ?? null,
+    };
+  }
+
+  async coachStatus(uid: string, sessionId: string, at: number) {
+    const [session, user] = await Promise.all([this.sessions(uid).doc(sessionId).get(), this.user(uid).get()]);
+    if (!session.exists) return null;
+    await this.touchPage(uid, user, at);
+    return {
+      listeningAt: (user.get("coachListeningAt") as string | undefined) ?? null,
+      updatedAt: (session.get("coachUpdatedAt") as string | undefined) ?? null,
+    };
+  }
+
+  /** The session's events that wait for a coach: pending, or taken and not answered. */
+  private openEvents(uid: string, sessionId: string) {
+    return this.coachEvents(uid, sessionId).where("status", "in", ["pending", "taken"]);
+  }
+
+  async addCoachEvent(uid: string, sessionId: string, event: { kind: "ask" | "note"; text: string }, at: number) {
+    const sessionRef = this.sessions(uid).doc(sessionId);
+    const open = this.openEvents(uid, sessionId);
+    return this.db.runTransaction(async (tx): Promise<CoachEvent | null> => {
+      const session = await tx.get(sessionRef);
+      if (!session.exists) return null;
+      const iso = new Date(at).toISOString();
+      let stillOpen = true;
+      if (event.kind === "note") {
+        // A note answers what the coach took in this session.
+        const snap = await tx.get(open);
+        for (const d of snap.docs) if (d.get("status") === "taken") tx.update(d.ref, { status: "done" });
+        stillOpen = snap.docs.some((d) => d.get("status") === "pending");
+      }
+      const ref = this.coachEvents(uid, sessionId).doc();
+      const doc: Omit<CoachEvent, "id"> = {
+        ...event,
+        sessionId,
+        createdAt: iso,
+        status: event.kind === "ask" ? "pending" : null,
+      };
+      tx.set(ref, doc);
+      tx.update(sessionRef, { coachUpdatedAt: iso, coachOpen: stillOpen });
+      return { id: ref.id, ...doc };
+    });
+  }
+
+  async setCoachCadence(uid: string, sessionId: string, cadence: CoachCadence) {
+    const coach: CoachCadenceState = { ...DEFAULT_CADENCE_STATE, cadence };
+    try {
+      await this.sessions(uid).doc(sessionId).update({ coach });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async tickCoach(uid: string, sessionId: string, at: number, run: boolean) {
+    const ref = this.sessions(uid).doc(sessionId);
+    const events = this.coachEvents(uid, sessionId);
+    return this.db.runTransaction(async (tx): Promise<CoachEvent | null> => {
+      const session = await tx.get(ref);
+      if (!session.exists) return null;
+      const before = (session.get("coach") as CoachCadenceState | undefined) ?? DEFAULT_CADENCE_STATE;
+      if (before.cadence === "ask") return null;
+      const { state, due } = advanceCadence(before, at, run);
+      // One pending check-in is enough: a coach that is away should not come back to a pile.
+      const pending = due ? await tx.get(events.where("status", "==", "pending")) : null;
+      const moved = state.runs !== before.runs || state.since !== before.since;
+      if (!due || pending?.docs.some((d) => d.get("kind") === "checkin")) {
+        if (moved) tx.update(ref, { coach: state });
+        return null;
+      }
+      const doc: Omit<CoachEvent, "id"> = {
+        sessionId,
+        kind: "checkin",
+        text: "",
+        reason: due,
+        createdAt: new Date(at).toISOString(),
+        status: "pending",
+      };
+      const eventRef = events.doc();
+      tx.set(eventRef, doc);
+      tx.update(ref, { coach: state, coachUpdatedAt: doc.createdAt, coachOpen: true });
+      return { id: eventRef.id, ...doc };
+    });
+  }
+
+  async takeCoachEvent(uid: string, sessionId: string, at: number) {
+    // Equality only, sorted in pickCoachEvent: no composite index, and only a few events are ever open.
+    const sessionRef = this.sessions(uid).doc(sessionId);
+    const open = this.openEvents(uid, sessionId);
+    return this.db.runTransaction(async (tx): Promise<CoachEvent | null> => {
+      const [session, snap] = await Promise.all([tx.get(sessionRef), tx.get(open)]);
+      if (!session.exists) return null;
+      const events = snap.docs.map((d) => withId<CoachEvent>(d));
+      const picked = pickCoachEvent(events, at);
+      const refOf = (id: string) => this.coachEvents(uid, sessionId).doc(id);
+      const iso = new Date(at).toISOString();
+      for (const id of picked.drop) tx.delete(refOf(id));
+      for (const id of picked.giveUp) tx.update(refOf(id), { status: "done" });
+      const touched = picked.take || picked.drop.length > 0 || picked.giveUp.length > 0;
+      const flagWrong = (session.get("coachOpen") === true) !== picked.open;
+      if (touched || flagWrong) {
+        tx.update(sessionRef, { ...(touched ? { coachUpdatedAt: iso } : {}), coachOpen: picked.open });
+      }
+      if (!picked.take) return null;
+      const taken = { status: "taken" as const, takenAt: iso, takes: (picked.take.takes ?? 0) + 1 };
+      tx.update(refOf(picked.take.id), taken);
+      return { ...picked.take, ...taken };
+    });
+  }
+
+  async releaseCoachEvent(uid: string, sessionId: string, eventId: string, at: number) {
+    const sessionRef = this.sessions(uid).doc(sessionId);
+    const ref = this.coachEvents(uid, sessionId).doc(eventId);
+    await this.db.runTransaction(async (tx) => {
+      const [session, event] = await Promise.all([tx.get(sessionRef), tx.get(ref)]);
+      if (!session.exists || event.get("status") !== "taken") return;
+      const takes = Number(event.get("takes") ?? 1);
+      tx.update(ref, { status: "pending", takenAt: null, takes: Math.max(0, takes - 1) });
+      tx.update(sessionRef, { coachUpdatedAt: new Date(at).toISOString(), coachOpen: true });
+    });
+  }
+
+  async openCoachSessions(uid: string) {
+    const snap = await this.sessions(uid).where("coachOpen", "==", true).select().get();
+    return snap.docs.map((d) => d.id);
+  }
+
+  async touchCoachListening(uid: string, at: number) {
+    await this.user(uid).set({ coachListeningAt: new Date(at).toISOString() }, { merge: true });
+  }
+
+  async coachPageSeenAt(uid: string) {
+    return ((await this.user(uid).get()).get("coachPageSeenAt") as string | undefined) ?? null;
+  }
+
+  watchCoachEvents(uid: string, sessionId: string, onChange: () => void) {
+    let first = true;
+    return this.coachEvents(uid, sessionId)
+      .where("status", "==", "pending")
+      .onSnapshot(
+        () => {
+          // The first snapshot is the state at subscribe time; the waiter has read it already.
+          if (first) first = false;
+          else onChange();
+        },
+        () => onChange(),
+      );
   }
 
   async createToken(hash: string, uid: string, label: string): Promise<TokenRecord> {
