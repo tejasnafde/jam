@@ -1,4 +1,7 @@
 import type {
+  CoachCadence,
+  CoachEvent,
+  CoachThread,
   ConsentDecisionResponse,
   ConsentRequestInfo,
   GrantInfo,
@@ -73,6 +76,11 @@ export function createApi(getIdToken: GetIdToken, base = "/api") {
       call<null>(`${session(id)}/error`, { method: "POST", body: JSON.stringify({ code, message }) }),
     sessionVersions: (id: string, before?: string | null) =>
       call<VersionPage>(`${session(id)}/versions${before ? `?before=${encodeURIComponent(before)}` : ""}`),
+    coachThread: (id: string) => call<CoachThread>(`${session(id)}/coach`),
+    /** Empty text is "Check my music". */
+    askCoach: (id: string, text: string) => post<CoachEvent>(`${session(id)}/coach/asks`, { text }),
+    setCoachCadence: (id: string, cadence: CoachCadence) =>
+      call<null>(`${session(id)}/coach/cadence`, { method: "PUT", body: JSON.stringify({ cadence }) }),
     saveAudio: (snapshot: SaveAudioRequest) => post<{ id: string }>("/audio", snapshot),
     /** The plan of the given session, or of the open one. */
     currentPlan: (sessionId?: string | null) =>
