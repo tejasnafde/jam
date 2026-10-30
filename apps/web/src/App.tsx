@@ -152,6 +152,7 @@ export function App({ panelOverride }: { panelOverride?: PanelOverride }) {
             onEdit={sessions.onEdit}
             getSessionId={sessions.getSessionId}
             onVersionSaved={onVersionSaved}
+            onEvalError={sessions.reportError}
           />
         </div>
         <div className={cn("min-h-0 md:h-full", !panelOpen && "md:hidden")}>

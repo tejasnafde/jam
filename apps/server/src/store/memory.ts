@@ -5,6 +5,7 @@ import {
   type CodeVersion,
   type PlanInput,
   type Session,
+  type SessionError,
   type SessionPlan,
 } from "@jam/shared";
 import type {
@@ -55,7 +56,7 @@ export class MemoryStore implements Store {
     const list = this.versions.get(uid) ?? [];
     const top = list.find((v) => v.sessionId === session.id);
     const ts = this.nextTime();
-    Object.assign(session, { lastCode: code, updatedAt: ts });
+    Object.assign(session, { lastCode: code, updatedAt: ts, lastError: null });
     this.current.set(uid, session.id);
     if (top && top.code === code) {
       top.evaluatedAt = ts;
@@ -213,6 +214,13 @@ export class MemoryStore implements Store {
       });
     }
     return { ...(this.find(uid, copy.id) as Session) };
+  }
+
+  async setSessionError(uid: string, id: string, error: SessionError | null) {
+    const found = this.find(uid, id);
+    if (!found) return false;
+    found.lastError = error ? { ...error } : null;
+    return true;
   }
 
   async deleteSession(uid: string, id: string) {

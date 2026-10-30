@@ -11,6 +11,20 @@ export const sessionNameSchema = z.string().trim().min(1).max(60);
 export const UNTITLED_SESSION_ID = "untitled";
 export const UNTITLED_SESSION_NAME = "Untitled";
 
+/** The last evaluation that failed, so the coach can see it. Cleared by the next good evaluation. */
+export const sessionErrorSchema = z.object({
+  code: z.string(),
+  message: z.string(),
+  at: z.string(),
+});
+export type SessionError = z.infer<typeof sessionErrorSchema>;
+
+export const reportErrorRequestSchema = z.object({
+  code: z.string().max(LIMITS.codeMaxChars),
+  message: z.string().trim().min(1).max(2000),
+});
+export type ReportErrorRequest = z.infer<typeof reportErrorRequestSchema>;
+
 export const sessionSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -22,6 +36,7 @@ export const sessionSchema = z.object({
   versionCount: z.number().int().min(0),
   /** The session's plan ("Today we paint"). */
   planId: z.string().nullable(),
+  lastError: sessionErrorSchema.nullable().optional(),
 });
 export type Session = z.infer<typeof sessionSchema>;
 

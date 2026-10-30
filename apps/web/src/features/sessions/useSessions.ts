@@ -265,5 +265,14 @@ export function useSessions(api: Api | null, editor: EditorBridge) {
   /** For the editor: the session a version goes to, read when the version is saved. */
   const getSessionId = useCallback(() => stateRef.current?.currentId ?? null, []);
 
-  return { handle, onEdit, refresh, getSessionId };
+  /** An evaluation failed: the coach sees it through get_current_code until the next good one. */
+  const reportError = useCallback(
+    (code: string, message: string) => {
+      const id = stateRef.current?.currentId;
+      if (api && id) void api.reportError(id, code, message.slice(0, 2000)).catch(console.error);
+    },
+    [api],
+  );
+
+  return { handle, onEdit, refresh, getSessionId, reportError };
 }

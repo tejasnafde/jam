@@ -1,4 +1,12 @@
-import type { AudioReading, AudioSnapshot, CodeVersion, PlanInput, Session, SessionPlan } from "@jam/shared";
+import type {
+  AudioReading,
+  AudioSnapshot,
+  CodeVersion,
+  PlanInput,
+  Session,
+  SessionError,
+  SessionPlan,
+} from "@jam/shared";
 
 export interface TokenRecord {
   /** The SHA-256 hash of the token, which is also the document id. */
@@ -95,7 +103,7 @@ export type PlanPatch = Partial<Pick<SessionPlan, "currentStage" | "note">>;
 export interface Store extends OAuthStore {
   /**
    * Saves an evaluation in a session (the current one when sessionId is left out) and
-   * makes it the session's lastCode. Identical code to the session's latest version bumps
+   * makes it the session's lastCode. A good evaluation clears the session's lastError. Identical code to the session's latest version bumps
    * its counter instead of adding a row. Null when the session does not exist.
    */
   saveVersion(uid: string, code: string, opts?: { email?: string; sessionId?: string }): Promise<CodeVersion | null>;
@@ -128,6 +136,8 @@ export interface Store extends OAuthStore {
   openSession(uid: string, id: string, previous?: { id: string; lastCode: string }): Promise<Session | null>;
   /** A copy of the code and the plan under a new name. Versions stay with the original. */
   duplicateSession(uid: string, id: string, name: string): Promise<Session | null>;
+  /** Saves (or with null clears) the session's last failed evaluation. False when the session does not exist. */
+  setSessionError(uid: string, id: string, error: SessionError | null): Promise<boolean>;
   /** Deletes the session with its versions and plans. False when it does not exist. */
   deleteSession(uid: string, id: string): Promise<boolean>;
   createToken(hash: string, uid: string, label: string): Promise<TokenRecord>;

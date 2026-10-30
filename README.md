@@ -54,7 +54,7 @@ in the URL.
 
 | Tool                 | Kind       | What it does                                                                        |
 | -------------------- | ---------- | ----------------------------------------------------------------------------------- |
-| `get_current_code`   | read       | The last evaluated code in the open session, with its name, when it ran, how often  |
+| `get_current_code`   | read       | The last evaluated code in the open session, and the last failed one (`lastError`)  |
 | `get_history`        | read       | Recent versions of a session (open one, or by name), as unified diffs or full code  |
 | `list_sessions`      | read       | The user's sessions: name, version count, last edited, which one is open            |
 | `get_audio_snapshot` | read       | Loudness and low/mid/high energy measured after each evaluation                     |

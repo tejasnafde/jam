@@ -1,5 +1,5 @@
 import type { Session } from "@jam/shared";
-import { DEFAULT_CODE, LOCAL_CODE_KEY } from "@/features/editor/defaultCode";
+import { DEFAULT_CODE, LOCAL_CODE_KEY, PLAY_KEY } from "@/features/editor/defaultCode";
 
 /** Which session the editor text in localStorage belongs to, and when the user last typed in it. */
 export interface DraftMeta {
@@ -71,7 +71,7 @@ export function freshName(sessions: Pick<Session, "name">[], base = "Untitled"):
 }
 
 /** The text a new session starts with. */
-export const NEW_SESSION_CODE = `// A new piece. Ctrl+Enter plays, Ctrl+. stops.
+export const NEW_SESSION_CODE = `// A new piece. ${PLAY_KEY}+Enter plays, ${PLAY_KEY}+. stops.
 setcpm(90/4)
 
 `;
