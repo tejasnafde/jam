@@ -1,7 +1,9 @@
 import { EventEmitter } from "node:events";
 import {
   advanceCadence,
+  COACH_PAGE_SEEN_WRITE_MS,
   DEFAULT_CADENCE_STATE,
+  pickCoachEvent,
   UNTITLED_SESSION_ID,
   UNTITLED_SESSION_NAME,
   type AudioSnapshot,
@@ -49,6 +51,10 @@ export class MemoryStore implements Store {
   /** Cadence state per `${uid}/${sessionId}`. */
   readonly cadences = new Map<string, CoachCadenceState>();
   readonly listening = new Map<string, string>();
+  /** When the page last polled the coach thread, per user. */
+  readonly pageSeen = new Map<string, string>();
+  /** When a session's coach thread last changed, per `${uid}/${sessionId}`. */
+  readonly coachUpdated = new Map<string, string>();
   private readonly coachChanges = new EventEmitter();
   private seq = 0;
 
@@ -258,35 +264,63 @@ export class MemoryStore implements Store {
       (this.coachEvents.get(uid) ?? []).filter((e) => e.sessionId !== id),
     );
     this.cadences.delete(`${uid}/${id}`);
+    this.coachUpdated.delete(`${uid}/${id}`);
     if (this.current.get(uid) === id) this.current.delete(uid);
     return true;
   }
 
-  async coachThread(uid: string, sessionId: string, limit: number) {
+  private touchPage(uid: string, at: number) {
+    const seen = this.pageSeen.get(uid);
+    if (!seen || at - Date.parse(seen) >= COACH_PAGE_SEEN_WRITE_MS) this.pageSeen.set(uid, new Date(at).toISOString());
+  }
+
+  async coachThread(uid: string, sessionId: string, limit: number, at: number) {
     if (!this.find(uid, sessionId)) return null;
+    this.touchPage(uid, at);
     const events = (this.coachEvents.get(uid) ?? []).filter((e) => e.sessionId === sessionId);
     return {
       events: events.slice(-limit).map((e) => ({ ...e })),
       cadence: (this.cadences.get(`${uid}/${sessionId}`) ?? DEFAULT_CADENCE_STATE).cadence,
       listeningAt: this.listening.get(uid) ?? null,
+      updatedAt: this.coachUpdated.get(`${uid}/${sessionId}`) ?? null,
     };
   }
 
-  private pushCoachEvent(uid: string, event: Omit<CoachEvent, "id">): CoachEvent {
+  async coachStatus(uid: string, sessionId: string, at: number) {
+    if (!this.find(uid, sessionId)) return null;
+    this.touchPage(uid, at);
+    return {
+      listeningAt: this.listening.get(uid) ?? null,
+      updatedAt: this.coachUpdated.get(`${uid}/${sessionId}`) ?? null,
+    };
+  }
+
+  private changed(uid: string, sessionId: string, at: number) {
+    this.coachUpdated.set(`${uid}/${sessionId}`, new Date(at).toISOString());
+  }
+
+  private sessionEvents(uid: string, sessionId: string) {
+    return (this.coachEvents.get(uid) ?? []).filter((e) => e.sessionId === sessionId);
+  }
+
+  private pushCoachEvent(uid: string, event: Omit<CoachEvent, "id">, at: number): CoachEvent {
     const saved = { ...event, id: this.nextId() };
     this.coachEvents.set(uid, [...(this.coachEvents.get(uid) ?? []), saved]);
+    this.changed(uid, event.sessionId, at);
     this.coachChanges.emit(`${uid}/${event.sessionId}`);
     return { ...saved };
   }
 
   async addCoachEvent(uid: string, sessionId: string, event: { kind: "ask" | "note"; text: string }, at: number) {
     if (!this.find(uid, sessionId)) return null;
-    return this.pushCoachEvent(uid, {
-      ...event,
-      sessionId,
-      createdAt: new Date(at).toISOString(),
-      status: event.kind === "ask" ? "pending" : null,
-    });
+    if (event.kind === "note") {
+      for (const e of this.sessionEvents(uid, sessionId)) if (e.status === "taken") e.status = "done";
+    }
+    return this.pushCoachEvent(
+      uid,
+      { ...event, sessionId, createdAt: new Date(at).toISOString(), status: event.kind === "ask" ? "pending" : null },
+      at,
+    );
   }
 
   async setCoachCadence(uid: string, sessionId: string, cadence: CoachCadence) {
@@ -301,29 +335,52 @@ export class MemoryStore implements Store {
     const { state, due } = advanceCadence(this.cadences.get(key) ?? DEFAULT_CADENCE_STATE, at, run);
     this.cadences.set(key, state);
     if (!due) return null;
-    const pending = (this.coachEvents.get(uid) ?? []).some(
-      (e) => e.sessionId === sessionId && e.kind === "checkin" && e.status === "pending",
+    if (this.sessionEvents(uid, sessionId).some((e) => e.kind === "checkin" && e.status === "pending")) return null;
+    return this.pushCoachEvent(
+      uid,
+      { sessionId, kind: "checkin", text: "", reason: due, createdAt: new Date(at).toISOString(), status: "pending" },
+      at,
     );
-    if (pending) return null;
-    return this.pushCoachEvent(uid, {
-      sessionId,
-      kind: "checkin",
-      text: "",
-      reason: due,
-      createdAt: new Date(at).toISOString(),
-      status: "pending",
-    });
   }
 
   async takeCoachEvent(uid: string, sessionId: string, at: number) {
-    const next = (this.coachEvents.get(uid) ?? []).find((e) => e.sessionId === sessionId && e.status === "pending");
-    if (!next) return null;
-    Object.assign(next, { status: "taken", takenAt: new Date(at).toISOString() });
-    return { ...next };
+    const { take, drop, giveUp } = pickCoachEvent(this.sessionEvents(uid, sessionId), at);
+    if (drop.length > 0) {
+      this.coachEvents.set(
+        uid,
+        (this.coachEvents.get(uid) ?? []).filter((e) => !drop.includes(e.id)),
+      );
+    }
+    for (const e of this.sessionEvents(uid, sessionId)) if (giveUp.includes(e.id)) e.status = "done";
+    if (take || drop.length > 0 || giveUp.length > 0) this.changed(uid, sessionId, at);
+    if (!take) return null;
+    const stored = this.sessionEvents(uid, sessionId).find((e) => e.id === take.id);
+    if (!stored) return null;
+    Object.assign(stored, { status: "taken", takenAt: new Date(at).toISOString(), takes: (stored.takes ?? 0) + 1 });
+    return { ...stored };
+  }
+
+  async releaseCoachEvent(uid: string, sessionId: string, eventId: string, at: number) {
+    const stored = this.sessionEvents(uid, sessionId).find((e) => e.id === eventId && e.status === "taken");
+    if (!stored) return;
+    Object.assign(stored, { status: "pending", takenAt: null, takes: Math.max(0, (stored.takes ?? 1) - 1) });
+    this.changed(uid, sessionId, at);
+  }
+
+  async openCoachSessions(uid: string) {
+    const ids = new Set<string>();
+    for (const e of this.coachEvents.get(uid) ?? []) {
+      if (e.status === "pending" || e.status === "taken") ids.add(e.sessionId);
+    }
+    return [...ids];
   }
 
   async touchCoachListening(uid: string, at: number) {
     this.listening.set(uid, new Date(at).toISOString());
+  }
+
+  async coachPageSeenAt(uid: string) {
+    return this.pageSeen.get(uid) ?? null;
   }
 
   /** Open watchers, for tests that check wait_for_change cleans up. */

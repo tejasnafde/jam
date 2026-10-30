@@ -48,9 +48,14 @@ export function App({ panelOverride }: { panelOverride?: PanelOverride }) {
   );
   const sessions = useSessions(auth.api, bridge);
   const { refresh: refreshSessions } = sessions;
-  const onVersionSaved = useCallback(() => void refreshSessions().catch(console.error), [refreshSessions]);
   const plan = usePlan(auth.api, sessions.handle.currentId);
   const coach = useCoach(auth.api, sessions.handle.currentId);
+  const { refresh: refreshCoach } = coach;
+  // A run can add a coach check-in, so the thread is checked at once too.
+  const onVersionSaved = useCallback(() => {
+    void refreshSessions().catch(console.error);
+    void refreshCoach().catch(console.error);
+  }, [refreshSessions, refreshCoach]);
   const [playing, setPlaying] = useState(false);
   const [panelOpen, setPanelOpen] = useLocalStorageFlag("jam:panel", true);
   const [live, setLive] = useLocalStorageFlag("jam:live", false);

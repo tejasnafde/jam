@@ -15,9 +15,10 @@ const events: CoachEvent[] = [
 
 function handle(thread: Partial<CoachThread> = {}): CoachHandle {
   return {
-    thread: { events: [], cadence: "ask", listeningAt: null, ...thread },
+    thread: { events: [], cadence: "ask", listeningAt: null, updatedAt: null, ...thread },
     ask: vi.fn(async () => {}),
     setCadence: vi.fn(async () => {}),
+    refresh: vi.fn(async () => {}),
   };
 }
 
@@ -69,6 +70,13 @@ describe("CoachSection", () => {
     expect(screen.queryByText("coach me live")).not.toBeInTheDocument();
     render(<CoachStatus coach={live} now={NOW} />);
     expect(screen.getByText("Coach listening")).toBeInTheDocument();
+  });
+
+  it("shows the start phrase above the ask box, so an ask never waits unexplained", () => {
+    render(<CoachSection signedIn coach={handle()} now={NOW} />);
+    const hint = screen.getByText(/No coach connected/);
+    const input = screen.getByRole("textbox", { name: "Ask the coach" });
+    expect(hint.compareDocumentPosition(input) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("calls a coach that waited 3 minutes ago gone", () => {

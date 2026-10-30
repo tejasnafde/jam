@@ -25,16 +25,28 @@ The "Coach" section shows the thread of the open session: your asks and the coac
 
 - **Ask the coach** (Enter sends) or **Check my music** (an ask with no text) adds a pending event.
 - **Automatic check-ins**: "Only when I ask" (default), "Every 15 runs", or "Every 10 minutes while I play" (10
-  minutes from the first run after the last check-in). The server adds the check-in; it keeps at most one pending.
+  minutes from the first run after the last check-in). The server adds the check-in; it keeps at most one pending,
+  and drops one that waited more than 10 minutes. Asks always go before check-ins.
   The coach never reacts to each Ctrl+Enter on its own.
 - **Coach listening** shows when a `wait_for_change` call was open in the last 2 minutes. Otherwise the page shows the
-  phrase to type, "coach me live".
+  phrase to type, "coach me live", above the ask box.
 
-The coach loops: `wait_for_change` returns the next event with the code, `lastError`, the latest audio snapshot and
-the plan stage, and marks it taken; the coach answers with `say` (600 characters at most), then waits again. On
-timeout `wait_for_change` returns `{"event": null}` and the coach just waits again.
+The coach loops: `wait_for_change` returns the next event with its session, the code, `lastError`, the audio
+snapshot of that code and the plan stage, and marks it taken; the coach answers with `say` (600 characters at most),
+then waits again. On timeout `wait_for_change` returns `{"event": null}` and the coach just waits again.
 
-A wait lasts up to `maxWaitSec` (default 300, max 900). Give the client a longer tool timeout. In Claude Code:
+- **Nothing gets lost.** A taken event that gets no coach note within 60 s goes back to the coach (at most 3 times).
+  A wait that fails or whose client went away gives its event back.
+- **Other sessions.** An ask left in a session that is no longer open still reaches the coach, which answers it in
+  that session (`say` with `session`).
+- **The page closes, the loop stops.** The page's poll records `pageSeenAt` (at most once a minute). When the page
+  has not polled for 3 minutes, `wait_for_change` returns `{"event": null, "userAway": true}` at once and the coach
+  stops, so a forgotten loop does not keep a Cloud Run instance busy.
+- **Cheap polling.** The page polls `GET /api/sessions/{id}/coach/status` (every 5 s while a coach listens, else
+  every 20 s) and reads the thread only when its `updatedAt` moves, and at once after an ask or a run.
+
+A wait lasts `maxWaitSec` (default 50, under the usual 60 s client tool timeout). Up to 900 is allowed, but only
+with a longer client tool timeout. In Claude Code:
 
 ```sh
 MCP_TOOL_TIMEOUT=960000 claude
@@ -78,21 +90,21 @@ in the URL.
 
 ## MCP tools
 
-| Tool                 | Kind       | What it does                                                                          |
-| -------------------- | ---------- | ------------------------------------------------------------------------------------- |
-| `get_current_code`   | read       | The last evaluated code in the open session, and the last failed one (`lastError`)    |
-| `get_history`        | read       | Recent versions of a session (open one, or by name), as unified diffs or full code    |
-| `list_sessions`      | read       | The user's sessions: name, version count, last edited, which one is open              |
-| `get_audio_snapshot` | read       | Loudness and low/mid/high energy measured after each evaluation                       |
-| `lookup_sound`       | read       | Search Strudel's default sounds: synths, `gm_*` soundfonts, sample banks, drum kits   |
-| `get_session_plan`   | read       | The current plan and stage                                                            |
-| `list_samples`       | read       | The user's sample library: kind, duration, BPM, key, stats, stems and ops             |
-| `get_sample`         | read       | One sample by name, with its stems and prepared versions                              |
-| `set_session_plan`   | plan write | Start a new plan for the open session (destination plus 4 to 6 stages)                |
-| `set_stage`          | plan write | Move to a stage, with an optional short note                                          |
-| `get_prep_status`    | read       | The user's prep jobs (stem split, tempo match, key shift) and the samples they made   |
-| `wait_for_change`    | read       | Waits for the next ask or check-in in the open session, with code, error, audio, plan |
-| `say`                | note write | Posts a short coach note (600 characters at most) in the page's Coach thread          |
+| Tool                 | Kind       | What it does                                                                        |
+| -------------------- | ---------- | ----------------------------------------------------------------------------------- |
+| `get_current_code`   | read       | The last evaluated code in the open session, and the last failed one (`lastError`)  |
+| `get_history`        | read       | Recent versions of a session (open one, or by name), as unified diffs or full code  |
+| `list_sessions`      | read       | The user's sessions: name, version count, last edited, which one is open            |
+| `get_audio_snapshot` | read       | Loudness and low/mid/high energy measured after each evaluation                     |
+| `lookup_sound`       | read       | Search Strudel's default sounds: synths, `gm_*` soundfonts, sample banks, drum kits |
+| `get_session_plan`   | read       | The current plan and stage                                                          |
+| `list_samples`       | read       | The user's sample library: kind, duration, BPM, key, stats, stems and ops           |
+| `get_sample`         | read       | One sample by name, with its stems and prepared versions                            |
+| `set_session_plan`   | plan write | Start a new plan for the open session (destination plus 4 to 6 stages)              |
+| `set_stage`          | plan write | Move to a stage, with an optional short note                                        |
+| `get_prep_status`    | read       | The user's prep jobs (stem split, tempo match, key shift) and the samples they made |
+| `wait_for_change`    | note write | Waits for the next ask or check-in, with code, error, audio, plan; marks it taken   |
+| `say`                | note write | Posts a short coach note (600 characters at most) in the page's Coach thread        |
 
 Prompt: `start_session` (optional `mood`, `minutes`). The coaching rules are also in the server instructions, so a
 client that does not use prompts still gets them.
@@ -175,8 +187,9 @@ The endpoints follow the MCP authorization spec. They use the MCP SDK's handlers
   deletes it and its tokens. A user keeps at most 20; the oldest goes first.
 
 Sessions live at `users/{uid}/sessions/{id}`; versions and plans carry a `sessionId`, and `users/{uid}` holds
-`currentSessionId` and `coachListeningAt`. A session's coach thread is `users/{uid}/sessions/{id}/coachEvents`, and
-its cadence state is the session's `coach` field. Listing a session's versions needs one composite index, kept as code in `firestore.indexes.json`.
+`currentSessionId`, `coachListeningAt` and `coachPageSeenAt`. A session's coach thread is
+`users/{uid}/sessions/{id}/coachEvents`; the session keeps its cadence state in `coach`, and `coachUpdatedAt` and
+`coachOpen` for cheap polling. Listing a session's versions needs one composite index, kept as code in `firestore.indexes.json`.
 Create it once (CI does not deploy indexes):
 
 ```sh

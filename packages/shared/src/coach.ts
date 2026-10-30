@@ -21,6 +21,17 @@ export const COACH_EVERY_MS = 10 * 60_000;
 /** A coach is "listening" when a wait_for_change call was open this recently. */
 export const COACH_LISTENING_MS = 2 * 60_000;
 
+/** A taken event with no coach note this long after the take goes back to the coach (a lost answer). */
+export const COACH_LEASE_MS = 60_000;
+/** How many times one event goes to a coach before the server gives up on it. */
+export const COACH_MAX_TAKES = 3;
+/** A pending check-in older than this is dropped, not delivered: it no longer describes the music. */
+export const COACH_CHECKIN_STALE_MS = 10 * 60_000;
+/** The page is "away" when its coach poll has not come for this long. A waiting coach then stops. */
+export const COACH_PAGE_AWAY_MS = 3 * 60_000;
+/** The page's coach poll records pageSeenAt at most this often. */
+export const COACH_PAGE_SEEN_WRITE_MS = 60_000;
+
 /** The longest ask and the longest coach note, in characters. */
 export const COACH_ASK_MAX = 600;
 export const COACH_NOTE_MAX = 600;
@@ -42,9 +53,14 @@ export const coachEventSchema = z.object({
   kind: coachEventKindSchema,
   text: z.string(),
   createdAt: z.string(),
-  /** Asks and check-ins wait as "pending" until a coach takes them. Notes have none. */
-  status: z.enum(["pending", "taken"]).nullable(),
+  /**
+   * Asks and check-ins wait as "pending" until a coach takes them. A coach note in the session
+   * makes the taken ones "done" (so does giving up after COACH_MAX_TAKES). Notes have none.
+   */
+  status: z.enum(["pending", "taken", "done"]).nullable(),
   takenAt: z.string().nullable().optional(),
+  /** How many times a coach took it. */
+  takes: z.number().int().optional(),
   /** Check-ins only: what made it due. */
   reason: z.enum(["runs", "minutes"]).optional(),
 });
@@ -55,8 +71,14 @@ export const coachThreadSchema = z.object({
   cadence: coachCadenceSchema,
   /** When a coach last waited for this user, or null. */
   listeningAt: z.string().nullable(),
+  /** When the thread last changed (an event added, taken, answered or dropped), or null. */
+  updatedAt: z.string().nullable(),
 });
 export type CoachThread = z.infer<typeof coachThreadSchema>;
+
+/** What the page polls: it reads the whole thread only when updatedAt moves. */
+export const coachStatusSchema = coachThreadSchema.pick({ listeningAt: true, updatedAt: true });
+export type CoachStatus = z.infer<typeof coachStatusSchema>;
 
 export const askCoachRequestSchema = z.object({
   text: z.string().trim().max(COACH_ASK_MAX).default(""),
@@ -103,6 +125,47 @@ export function advanceCadence(
         : null;
   if (due) return { state: { cadence: state.cadence, runs: 0, since: null }, due };
   return { state: { cadence: state.cadence, runs, since }, due: null };
+}
+
+/**
+ * What a waiting coach does with a session's open events (pending, or taken and not answered) at
+ * time `at`: drop stale pending check-ins, give up on events taken COACH_MAX_TAKES times, and take
+ * the next one. Asks go before check-ins, older before newer. A taken event comes back after
+ * COACH_LEASE_MS. `open` tells if the session still has open events afterwards.
+ */
+export function pickCoachEvent(
+  events: readonly CoachEvent[],
+  at: number,
+): { take: CoachEvent | null; drop: string[]; giveUp: string[]; open: boolean } {
+  const drop: string[] = [];
+  const giveUp: string[] = [];
+  const ready: CoachEvent[] = [];
+  let open = false;
+  for (const e of events) {
+    if (e.status === "pending") {
+      if (e.kind === "checkin" && at - Date.parse(e.createdAt) >= COACH_CHECKIN_STALE_MS) {
+        drop.push(e.id);
+        continue;
+      }
+      ready.push(e);
+    } else if (e.status === "taken") {
+      const leaseOver = !e.takenAt || at - Date.parse(e.takenAt) >= COACH_LEASE_MS;
+      if (leaseOver && (e.takes ?? 1) >= COACH_MAX_TAKES) {
+        giveUp.push(e.id);
+        continue;
+      }
+      if (leaseOver) ready.push(e);
+    } else continue;
+    open = true;
+  }
+  const rank = (e: CoachEvent) => (e.kind === "ask" ? 0 : 1);
+  ready.sort((a, b) => rank(a) - rank(b) || a.createdAt.localeCompare(b.createdAt));
+  return { take: ready[0] ?? null, drop, giveUp, open };
+}
+
+/** True when the page has not polled the coach thread within COACH_PAGE_AWAY_MS of `now`, or never. */
+export function isPageAway(pageSeenAt: string | null | undefined, now: number): boolean {
+  return !pageSeenAt || now - Date.parse(pageSeenAt) >= COACH_PAGE_AWAY_MS;
 }
 
 /** True when a coach waited within COACH_LISTENING_MS of `now`. */

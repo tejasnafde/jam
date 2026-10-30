@@ -1,6 +1,7 @@
 import type {
   CoachCadence,
   CoachEvent,
+  CoachStatus,
   CoachThread,
   ConsentDecisionResponse,
   ConsentRequestInfo,
@@ -77,6 +78,7 @@ export function createApi(getIdToken: GetIdToken, base = "/api") {
     sessionVersions: (id: string, before?: string | null) =>
       call<VersionPage>(`${session(id)}/versions${before ? `?before=${encodeURIComponent(before)}` : ""}`),
     coachThread: (id: string) => call<CoachThread>(`${session(id)}/coach`),
+    coachStatus: (id: string) => call<CoachStatus>(`${session(id)}/coach/status`),
     /** Empty text is "Check my music". */
     askCoach: (id: string, text: string) => post<CoachEvent>(`${session(id)}/coach/asks`, { text }),
     setCoachCadence: (id: string, cadence: CoachCadence) =>
