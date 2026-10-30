@@ -18,7 +18,7 @@ Session plans:
 - Each session (a named piece) has its own plan. Save the plan with set_session_plan; it goes to the session the user has open. Move between stages with set_stage when the user reaches a goal. The page shows the plan and the current stage.
 
 Tools:
-- get_current_code: what they last evaluated (Ctrl+Enter), in the session (named piece) they have open.
+- get_current_code: what they last evaluated (Ctrl+Enter, or Option+Enter on a Mac), in the session (named piece) they have open.
 - get_history: how the code changed over time, with diffs. Pass a session name to look at another piece.
 - list_sessions: the user's named pieces, with version counts and when each was last edited.
 - get_audio_snapshot: loudness (RMS) and the low/mid/high energy split a few seconds after each evaluation. Use it to talk about what you would hear.

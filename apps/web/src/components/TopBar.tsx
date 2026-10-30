@@ -5,6 +5,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { LevelMeter } from "./LevelMeter";
 import { LiveToggle } from "./LiveToggle";
 import { Logo } from "./Logo";
+import { PLAY_KEY } from "@/features/editor/defaultCode";
 import { PlayButton } from "./PlayButton";
 
 interface Props {
@@ -53,13 +54,13 @@ export function TopBar({
       {/* A phone has no room here; the page shows the name in a strip below instead. */}
       {session && <div className="flex min-w-0 items-center max-md:hidden">{session}</div>}
       <p className="flex items-center gap-1.5 text-xs text-muted-foreground max-xl:hidden" aria-label="Shortcuts">
-        <kbd className="jam-kbd">Ctrl</kbd>
+        <kbd className="jam-kbd">{PLAY_KEY}</kbd>
         <kbd className="jam-kbd">Enter</kbd>
         <span>plays</span>
         <span className="mx-1 text-gutter" aria-hidden="true">
           /
         </span>
-        <kbd className="jam-kbd">Ctrl</kbd>
+        <kbd className="jam-kbd">{PLAY_KEY}</kbd>
         <kbd className="jam-kbd">.</kbd>
         <span>stops</span>
       </p>
