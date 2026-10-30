@@ -3,12 +3,15 @@ import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { LevelMeter } from "./LevelMeter";
+import { LiveToggle } from "./LiveToggle";
 import { Logo } from "./Logo";
 import { PlayButton } from "./PlayButton";
 
 interface Props {
   playing: boolean;
   onTogglePlay: () => void;
+  live: boolean;
+  onLiveChange: (on: boolean) => void;
   panelOpen: boolean;
   onTogglePanel: () => void;
   status: ReactNode;
@@ -16,7 +19,17 @@ interface Props {
   account: ReactNode;
 }
 
-export function TopBar({ playing, onTogglePlay, panelOpen, onTogglePanel, status, tools, account }: Props) {
+export function TopBar({
+  playing,
+  onTogglePlay,
+  live,
+  onLiveChange,
+  panelOpen,
+  onTogglePanel,
+  status,
+  tools,
+  account,
+}: Props) {
   return (
     <header className="sticky top-0 z-10 flex h-14 flex-none items-center gap-3 border-b border-hairline bg-background px-3 md:gap-4 md:px-4">
       <a
@@ -29,7 +42,10 @@ export function TopBar({ playing, onTogglePlay, panelOpen, onTogglePanel, status
       </a>
       <div className="flex items-center gap-2">
         <PlayButton playing={playing} onToggle={onTogglePlay} />
-        <LevelMeter playing={playing} />
+        <LiveToggle on={live} onChange={onLiveChange} />
+        <span className="max-sm:hidden">
+          <LevelMeter playing={playing} />
+        </span>
       </div>
       <p className="flex items-center gap-1.5 text-xs text-muted-foreground max-xl:hidden" aria-label="Shortcuts">
         <kbd className="jam-kbd">Ctrl</kbd>

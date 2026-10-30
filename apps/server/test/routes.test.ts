@@ -64,3 +64,12 @@ describe("tokens", () => {
     await request(app).post("/api/tokens").set(asUser("alice")).send({ label: "one more" }).expect(409);
   });
 });
+
+describe("sounds", () => {
+  it("lists the default sound names without sign-in", async () => {
+    const { app } = setup();
+    const res = await request(app).get("/api/sounds").expect(200);
+    const names = (res.body as { sounds: { name: string }[] }).sounds.map((s) => s.name);
+    expect(names).toEqual(expect.arrayContaining(["sawtooth", "RolandTR808_bd", "bd"]));
+  });
+});
