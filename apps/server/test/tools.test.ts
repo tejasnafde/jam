@@ -15,8 +15,9 @@ describe("read-only guarantee", () => {
     for (const tool of tools) {
       expect(tool.name).not.toMatch(/write|edit|code_set|set_code|update_code|eval/);
       expect(Object.keys(tool.inputSchema.properties ?? {})).not.toContain("code");
-      // set_* write the plan and say writes a coach note. Every other tool only reads.
-      if (!tool.name.startsWith("set_") && tool.name !== "say") expect(tool.annotations?.readOnlyHint).toBe(true);
+      // set_* write the plan; say and wait_for_change write the coach thread. Every other tool only reads.
+      const writes = tool.name.startsWith("set_") || tool.name === "say" || tool.name === "wait_for_change";
+      expect(tool.annotations?.readOnlyHint).toBe(!writes);
     }
   });
 

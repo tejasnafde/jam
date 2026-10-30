@@ -125,9 +125,21 @@ export function sessionsRouter(store: Store, now: () => number) {
     asyncHandler(async (req, res) => {
       const id = sessionParam(req, res);
       if (!id) return;
-      const thread = await store.coachThread(pageUser(req).uid, id, COACH_THREAD_MAX);
+      const thread = await store.coachThread(pageUser(req).uid, id, COACH_THREAD_MAX, now());
       if (!thread) return notFound(res);
       res.json(thread);
+    }),
+  );
+
+  // What the page polls: two small reads. It reads the thread only when updatedAt moves.
+  router.get(
+    "/:id/coach/status",
+    asyncHandler(async (req, res) => {
+      const id = sessionParam(req, res);
+      if (!id) return;
+      const status = await store.coachStatus(pageUser(req).uid, id, now());
+      if (!status) return notFound(res);
+      res.json(status);
     }),
   );
 

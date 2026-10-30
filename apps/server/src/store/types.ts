@@ -2,6 +2,7 @@ import type {
   AudioReading,
   CoachCadence,
   CoachEvent,
+  CoachStatus,
   CoachThread,
   AudioSnapshot,
   CodeVersion,
@@ -100,11 +101,23 @@ export type NewAudioSnapshot = AudioReading & { versionId: string | null; window
 export type SessionPatch = Partial<Pick<Session, "name" | "lastCode">>;
 export type PlanPatch = Partial<Pick<SessionPlan, "currentStage" | "note">>;
 
-/** The coach thread of a session (users/{uid}/sessions/{id}/coachEvents in Firestore). */
+/**
+ * The coach thread of a session (users/{uid}/sessions/{id}/coachEvents in Firestore). The session
+ * keeps `coachUpdatedAt` (when the thread last changed) and `coachOpen` (it has pending or taken,
+ * unanswered events), so the page and a waiting coach read one field instead of the thread.
+ */
 export interface CoachStore {
-  /** The newest `limit` events, oldest first, with the cadence and the listening heartbeat. Null when the session does not exist. */
-  coachThread(uid: string, sessionId: string, limit: number): Promise<CoachThread | null>;
-  /** Adds an ask (pending, for a coach to take) or a coach note. Null when the session does not exist. */
+  /**
+   * The newest `limit` events, oldest first, with the cadence and the listening heartbeat. Null when
+   * the session does not exist. The page reads it, so it records pageSeenAt (at most once a minute).
+   */
+  coachThread(uid: string, sessionId: string, limit: number, at: number): Promise<CoachThread | null>;
+  /** When the thread last changed and when a coach last waited. Records pageSeenAt like coachThread. */
+  coachStatus(uid: string, sessionId: string, at: number): Promise<CoachStatus | null>;
+  /**
+   * Adds an ask (pending, for a coach to take) or a coach note. A note makes the session's taken
+   * events done. Null when the session does not exist.
+   */
   addCoachEvent(
     uid: string,
     sessionId: string,
@@ -118,10 +131,16 @@ export interface CoachStore {
    * check-in when one is due and none is pending already. Returns the check-in it added, or null.
    */
   tickCoach(uid: string, sessionId: string, at: number, run: boolean): Promise<CoachEvent | null>;
-  /** Atomically marks the oldest pending ask or check-in of the session taken, and returns it. */
+  /** Atomically applies pickCoachEvent to the session's open events and returns the event it took. */
   takeCoachEvent(uid: string, sessionId: string, at: number): Promise<CoachEvent | null>;
+  /** Puts a taken event back to pending, when its result never reached the coach. */
+  releaseCoachEvent(uid: string, sessionId: string, eventId: string, at: number): Promise<void>;
+  /** The ids of the user's sessions with open events. */
+  openCoachSessions(uid: string): Promise<string[]>;
   /** Records that a coach is waiting for this user's events now. */
   touchCoachListening(uid: string, at: number): Promise<void>;
+  /** When the page last polled the coach thread, or null. */
+  coachPageSeenAt(uid: string): Promise<string | null>;
   /**
    * Calls onChange when the session's thread may have a new pending event. Returns the stop
    * function. A spurious call is fine: the waiter checks again.

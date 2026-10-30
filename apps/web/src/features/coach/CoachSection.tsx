@@ -175,6 +175,15 @@ export function CoachSection({ signedIn, coach, now: fixedNow }: Props) {
         </p>
       )}
 
+      {!listening && (
+        <div className="flex flex-col gap-1.5">
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            No coach connected, so an ask waits. Start one in your assistant with:
+          </p>
+          <CopyField value={LIVE_PHRASE} label="the phrase" />
+        </div>
+      )}
+
       <form className="flex items-center gap-1.5" onSubmit={onSubmit}>
         <Input
           value={text}
@@ -213,13 +222,6 @@ export function CoachSection({ signedIn, coach, now: fixedNow }: Props) {
           </SelectContent>
         </Select>
       </div>
-
-      {!listening && (
-        <div className="flex flex-col gap-1.5">
-          <p className="text-xs leading-relaxed text-muted-foreground">No coach connected. Start one with:</p>
-          <CopyField value={LIVE_PHRASE} label="the phrase" />
-        </div>
-      )}
     </div>
   );
 }

@@ -102,8 +102,9 @@ function previewCoach(events: CoachEvent[], listening: boolean): CoachHandle {
     events,
     cadence: "runs15",
     listeningAt: listening ? new Date().toISOString() : null,
+    updatedAt: null,
   };
-  return { thread, ask: noop, setCadence: noop };
+  return { thread, ask: noop, setCadence: noop, refresh: noop };
 }
 
 /**
@@ -122,7 +123,12 @@ export function previewPanel(state: string | null): PanelOverride {
     samples: [],
     prep: { jobs: {}, start: async () => {} },
     sessions: { ...PREVIEW_SESSIONS, sessions: [PREVIEW_SESSIONS.sessions[2] as Session], currentId: "untitled" },
-    coach: { thread: { events: [], cadence: "ask", listeningAt: null }, ask: noop, setCadence: noop },
+    coach: {
+      thread: { events: [], cadence: "ask", listeningAt: null, updatedAt: null },
+      ask: noop,
+      setCadence: noop,
+      refresh: noop,
+    },
   };
 }
 
