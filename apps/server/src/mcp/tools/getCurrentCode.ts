@@ -14,8 +14,8 @@ export const registerGetCurrentCode: ToolRegistrar = (server, { uid, store }) =>
       const session = await store.currentSession(uid);
       const version = await store.latestVersion(uid, session.id);
       if (!version) return textResult(`The user has not evaluated any code yet in the session "${session.name}".`);
-      const { sessionId: _sessionId, ...rest } = version;
-      return jsonResult({ session: session.name, ...rest });
+      const { id, code, createdAt, evaluatedAt, evalCount } = version;
+      return jsonResult({ session: session.name, id, code, createdAt, evaluatedAt, evalCount });
     },
   );
 };

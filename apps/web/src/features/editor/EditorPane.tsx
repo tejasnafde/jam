@@ -69,7 +69,6 @@ export function EditorPane({
     onEditRef.current = onEdit;
   });
 
-
   // Built once the editor is mounted: the controller evaluates through the editor handle.
   const liveMode = useRef<{ controller: LiveController; versions: VersionCoalescer } | null>(null);
   useEffect(() => {

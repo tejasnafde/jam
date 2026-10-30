@@ -17,6 +17,16 @@ Live at <https://jam.tn07.dev>.
    about to paint today": a destination and 4 to 6 stages. Each stage is a goal with at most one hint, never code.
    The plan shows in the side panel and moves along as you reach each goal.
 
+### Sessions
+
+A session is a named piece. The side panel lists them under "Sessions" with their version count and last edit; the
+top bar shows the open one (select the name to rename it). Every version and plan belongs to one session, so opening
+a session brings back its code and its "Today we paint" plan, on any computer. Opening never plays anything. The
+editor text of the session you leave is saved first, and the open session also saves its text a few seconds after you
+stop typing. Expand a session to page through its versions: Preview shows the code read-only, Restore puts it in
+the editor as a new edit (it does not play it). Versions from before sessions belong to a session named "Untitled",
+made on first load.
+
 ## Connect claude.ai or ChatGPT
 
 Both use OAuth: you paste one URL, and jam asks you to sign in and allow the connection.
@@ -44,14 +54,15 @@ in the URL.
 
 | Tool                 | Kind       | What it does                                                                        |
 | -------------------- | ---------- | ----------------------------------------------------------------------------------- |
-| `get_current_code`   | read       | The last evaluated code, with when it ran and how often                             |
-| `get_history`        | read       | Recent versions, newest first, as unified diffs or full code                        |
+| `get_current_code`   | read       | The last evaluated code in the open session, with its name, when it ran, how often  |
+| `get_history`        | read       | Recent versions of a session (open one, or by name), as unified diffs or full code  |
+| `list_sessions`      | read       | The user's sessions: name, version count, last edited, which one is open            |
 | `get_audio_snapshot` | read       | Loudness and low/mid/high energy measured after each evaluation                     |
 | `lookup_sound`       | read       | Search Strudel's default sounds: synths, `gm_*` soundfonts, sample banks, drum kits |
 | `get_session_plan`   | read       | The current plan and stage                                                          |
 | `list_samples`       | read       | The user's sample library: kind, duration, BPM, key, stats, stems and ops           |
 | `get_sample`         | read       | One sample by name, with its stems and prepared versions                            |
-| `set_session_plan`   | plan write | Start a new plan (destination plus 4 to 6 stages)                                   |
+| `set_session_plan`   | plan write | Start a new plan for the open session (destination plus 4 to 6 stages)              |
 | `set_stage`          | plan write | Move to a stage, with an optional short note                                        |
 | `get_prep_status`    | read       | The user's prep jobs (stem split, tempo match, key shift) and the samples they made |
 
@@ -134,6 +145,16 @@ The endpoints follow the MCP authorization spec. They use the MCP SDK's handlers
   `state` on the redirect back to the client (Cloud Run logs every URL).
 - **Grants.** Each Allow creates a grant: one connected app. Revoking it (side panel, or `/revoke` with a refresh token)
   deletes it and its tokens. A user keeps at most 20; the oldest goes first.
+
+Sessions live at `users/{uid}/sessions/{id}`; versions and plans carry a `sessionId`, and `users/{uid}` holds
+`currentSessionId`. Listing a session's versions needs one composite index, kept as code in `firestore.indexes.json`.
+Create it once (CI does not deploy indexes):
+
+```sh
+gcloud firestore indexes composite create --database=jam-db --project=teejayproject \
+  --collection-group=versions --query-scope=COLLECTION \
+  --field-config=field-path=sessionId,order=ascending --field-config=field-path=createdAt,order=descending
+```
 
 Firestore collections: `oauthClients`, `oauthRequests`, `oauthCodes`, `oauthGrants`, `oauthTokens`. All queries are
 single-field, so there is no composite index. Requests, codes and tokens carry an `expireAt` Timestamp for an optional

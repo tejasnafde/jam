@@ -14,7 +14,7 @@ export const registerSetSessionPlan: ToolRegistrar = (server, { uid, store }) =>
     },
     async (input) => {
       const session = await store.currentSession(uid);
-      const { sessionId: _sessionId, ...plan } = await store.savePlan(uid, input, session.id);
+      const plan = await store.savePlan(uid, input, session.id);
       return jsonResult({ session: session.name, ...plan });
     },
   );

@@ -25,10 +25,6 @@ import type { SessionsHandle } from "./useSessions";
 interface Props {
   signedIn: boolean;
   sessions: SessionsHandle;
-  /** For tests and screenshots: the session whose versions start open. */
-  initialExpanded?: string | null;
-  /** For tests and screenshots: the session that starts in rename mode. */
-  initialRenaming?: string | null;
 }
 
 const versionsText = (n: number) => (n === 1 ? "1 version" : `${n.toLocaleString()} versions`);
@@ -138,11 +134,24 @@ function VersionList({ session, sessions }: { session: Session; sessions: Sessio
     }
   };
 
+  // The first page. The parent remounts this list when the session gets a new version.
   useEffect(() => {
-    void load(null);
-    // The parent remounts this list when the session gets a new version.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    let cancelled = false;
+    loadVersions(session.id, null)
+      .then((page) => {
+        if (cancelled) return;
+        setVersions(page.versions);
+        setNext(page.nextBefore);
+      })
+      .catch((err: unknown) => {
+        console.error(err);
+        if (!cancelled) setFailed(true);
+      })
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [loadVersions, session.id]);
 
   const restore = (v: VersionEntry) => {
     setPreview(null);
@@ -154,20 +163,21 @@ function VersionList({ session, sessions }: { session: Session; sessions: Sessio
       {versions.length > 0 && (
         <ul aria-label={`${session.name} versions`} className="flex flex-col">
           {versions.map((v) => (
-            <li
-              key={v.id}
-              className="group grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2.5 border-b border-hairline last:border-0"
-            >
-              <time dateTime={v.createdAt} className="text-xs text-muted-foreground tabular-nums">
-                {versionTime(v.createdAt)}
-              </time>
-              <span className="truncate py-1.5 font-mono text-xs" title={v.summary}>
+            <li key={v.id} className="group flex items-center gap-2 border-b border-hairline last:border-0">
+              <span className="min-w-0 flex-1 truncate py-1.5 font-mono text-xs" title={v.summary}>
                 {v.summary}
               </span>
-              <span className="flex items-center text-muted-foreground transition-colors group-focus-within:text-foreground group-hover:text-foreground">
+              {/* On a wide screen the actions take the place of the time on hover; a phone shows both. */}
+              <time
+                dateTime={v.createdAt}
+                className="flex-none text-xs text-muted-foreground tabular-nums md:group-focus-within:hidden md:group-hover:hidden"
+              >
+                {versionTime(v.createdAt)}
+              </time>
+              <span className="flex flex-none items-center text-muted-foreground md:hidden md:group-focus-within:flex md:group-hover:flex">
                 <Button
                   variant="ghost"
-                  size="icon-sm"
+                  size="icon-xs"
                   onClick={() => setPreview(v)}
                   aria-label={`Preview version from ${versionTime(v.createdAt)}`}
                 >
@@ -175,7 +185,7 @@ function VersionList({ session, sessions }: { session: Session; sessions: Sessio
                 </Button>
                 <Button
                   variant="ghost"
-                  size="icon-sm"
+                  size="icon-xs"
                   onClick={() => restore(v)}
                   aria-label={`Restore version from ${versionTime(v.createdAt)}`}
                 >
@@ -283,7 +293,6 @@ function SessionRow({
               /
             </span>
             <span>{relativeTime(session.updatedAt)}</span>
-            {current && <span className="ml-auto text-oil">open</span>}
           </p>
         </div>
         <span className="flex flex-none items-center text-muted-foreground transition-colors group-focus-within:text-foreground group-hover:text-foreground">
@@ -325,9 +334,9 @@ function SessionRow({
 }
 
 /** Named pieces: open one to continue it on any computer. The open one gets every new version. */
-export function SessionsSection({ signedIn, sessions, initialExpanded = null, initialRenaming = null }: Props) {
-  const [expanded, setExpanded] = useState<string | null>(initialExpanded);
-  const [renaming, setRenaming] = useState<string | null>(initialRenaming);
+export function SessionsSection({ signedIn, sessions }: Props) {
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
 
   if (!signedIn) {

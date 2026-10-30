@@ -10,8 +10,7 @@ function api(ctx: ReturnType<typeof setup>, uid = "alice") {
   const { app, asUser } = ctx;
   const as = asUser(uid);
   return {
-    list: async () =>
-      (await request(app).get("/api/sessions").set(as).expect(200)).body as SessionListResponse,
+    list: async () => (await request(app).get("/api/sessions").set(as).expect(200)).body as SessionListResponse,
     create: async (name: string, lastCode = "") =>
       (await request(app).post("/api/sessions").set(as).send({ name, lastCode }).expect(201)).body as Session,
     open: (id: string, previous?: { id: string; lastCode: string }) =>

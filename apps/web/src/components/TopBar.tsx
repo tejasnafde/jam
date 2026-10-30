@@ -15,6 +15,8 @@ interface Props {
   panelOpen: boolean;
   onTogglePanel: () => void;
   status: ReactNode;
+  /** The open session's name. */
+  session?: ReactNode;
   tools?: ReactNode;
   account: ReactNode;
 }
@@ -27,6 +29,7 @@ export function TopBar({
   panelOpen,
   onTogglePanel,
   status,
+  session,
   tools,
   account,
 }: Props) {
@@ -47,6 +50,8 @@ export function TopBar({
           <LevelMeter playing={playing} />
         </span>
       </div>
+      {/* A phone has no room here; the page shows the name in a strip below instead. */}
+      {session && <div className="flex min-w-0 items-center max-md:hidden">{session}</div>}
       <p className="flex items-center gap-1.5 text-xs text-muted-foreground max-xl:hidden" aria-label="Shortcuts">
         <kbd className="jam-kbd">Ctrl</kbd>
         <kbd className="jam-kbd">Enter</kbd>

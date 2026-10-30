@@ -58,7 +58,7 @@ export function relativeTime(iso: string, now = Date.now()): string {
 /** A time of day for a version row: "14:05", with the day when it is not today. */
 export function versionTime(iso: string, now = Date.now()): string {
   const d = new Date(iso);
-  const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
   if (d.toDateString() === new Date(now).toDateString()) return time;
   return `${d.toLocaleDateString(undefined, { day: "numeric", month: "short" })}, ${time}`;
 }

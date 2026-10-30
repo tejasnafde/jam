@@ -94,9 +94,7 @@ export class FirestoreStore implements Store {
     return this.db.runTransaction(async (tx): Promise<CodeVersion | null> => {
       const session = await tx.get(sessionRef);
       if (!session.exists) return null;
-      const latest = await tx.get(
-        versions.where("sessionId", "==", sessionId).orderBy("createdAt", "desc").limit(1),
-      );
+      const latest = await tx.get(versions.where("sessionId", "==", sessionId).orderBy("createdAt", "desc").limit(1));
       const email = opts.email;
       tx.set(userRef, { ...(email ? { email } : {}), updatedAt: ts, currentSessionId: sessionId }, { merge: true });
       const top = latest.docs[0];
@@ -120,10 +118,7 @@ export class FirestoreStore implements Store {
 
   async listVersions(uid: string, limit: number, opts: { sessionId?: string; before?: string } = {}) {
     const sessionId = await this.sessionIdOr(uid, opts.sessionId);
-    let query = this.user(uid)
-      .collection("versions")
-      .where("sessionId", "==", sessionId)
-      .orderBy("createdAt", "desc");
+    let query = this.user(uid).collection("versions").where("sessionId", "==", sessionId).orderBy("createdAt", "desc");
     if (opts.before !== undefined) query = query.startAfter(opts.before);
     const snap = await query.limit(limit).get();
     return snap.docs.map((d) => withId<CodeVersion>(d));
@@ -290,7 +285,10 @@ export class FirestoreStore implements Store {
     const plan = await this.currentPlan(uid, id);
     if (!plan) return copy;
     const saved = await this.savePlan(uid, { destination: plan.destination, stages: plan.stages }, copy.id);
-    await this.updatePlan(uid, saved.id, { currentStage: plan.currentStage, ...(plan.note ? { note: plan.note } : {}) });
+    await this.updatePlan(uid, saved.id, {
+      currentStage: plan.currentStage,
+      ...(plan.note ? { note: plan.note } : {}),
+    });
     return { ...copy, planId: saved.id };
   }
 

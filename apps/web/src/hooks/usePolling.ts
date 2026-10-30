@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
 
-/** Calls fn now and every intervalMs while the tab is visible. */
-export function usePolling(fn: (() => Promise<void>) | null, intervalMs: number) {
+/** Calls fn now and every intervalMs while the tab is visible. A new restartKey calls it again at once. */
+export function usePolling(fn: (() => Promise<void>) | null, intervalMs: number, restartKey?: string | null) {
   const latest = useRef(fn);
   useLayoutEffect(() => {
     latest.current = fn;
@@ -24,7 +24,7 @@ export function usePolling(fn: (() => Promise<void>) | null, intervalMs: number)
       clearTimeout(timer);
       document.removeEventListener("visibilitychange", onVisible);
     };
-    // Restart only when polling turns on or off, not on every new closure.
+    // Restart only when polling turns on or off (or the key changes), not on every new closure.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [!!fn, intervalMs]);
+  }, [!!fn, intervalMs, restartKey]);
 }
