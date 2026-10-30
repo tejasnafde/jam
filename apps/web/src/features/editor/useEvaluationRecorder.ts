@@ -1,6 +1,10 @@
 import { useCallback, useRef } from "react";
+import { track } from "@/lib/analytics";
 import { ApiError, type Api } from "@/lib/api";
 import { measure } from "@/lib/audio";
+
+// One play_started per page load, not one per Ctrl+Enter.
+let playStarted = false;
 
 const SETTLE_MS = 1000;
 const WINDOW_MS = 3000;
@@ -40,6 +44,10 @@ export function useEvaluationRecorder(
           version = await api.saveVersion(code, getSessionId() ?? undefined);
         }
         onStatus("saved");
+        if (!playStarted) {
+          playStarted = true;
+          track("play_started");
+        }
         onSaved?.();
         await new Promise((r) => setTimeout(r, SETTLE_MS));
         if (mine !== seq.current || !isPlaying()) return;

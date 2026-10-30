@@ -1,6 +1,7 @@
 import type { ConsentRequestInfo } from "@jam/shared";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/features/auth/authContext";
+import { track } from "@/lib/analytics";
 import { fetchConsentRequest } from "@/lib/api";
 import { ConsentView } from "./ConsentView";
 
@@ -30,6 +31,7 @@ export function ConsentPage({ requestId }: { requestId: string }) {
     setBusy(true);
     try {
       const { redirectTo } = await auth.api.decideConsent(requestId, allow);
+      if (allow) track("assistant_connected", { kind: "oauth" });
       setLeavingTo(new URL(redirectTo).host);
       window.location.assign(redirectTo);
     } catch (err) {
