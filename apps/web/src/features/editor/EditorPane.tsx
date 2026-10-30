@@ -29,7 +29,8 @@ export function EditorPane({ editorRef, onPlayingChange, onSaveStatus, live = fa
   const playing = useRef(false);
   const liveRef = useRef(live);
   const lastCode = useRef<string | null>(null);
-  const reverting = useRef(false);
+  // The code a Live revert put back, until its evaluation reports.
+  const reverting = useRef<string | null>(null);
 
   const record = useEvaluationRecorder(api, () => playing.current, onSaveStatus);
   const recordRef = useRef(record);
@@ -45,7 +46,7 @@ export function EditorPane({ editorRef, onPlayingChange, onSaveStatus, live = fa
     const controller = new LiveController({
       evaluate: (code) => void editorRef.current?.evaluateQuiet(code),
       revert: (code) => {
-        reverting.current = true;
+        reverting.current = code;
         void editorRef.current?.evaluateQuiet(code);
       },
     });
@@ -57,8 +58,12 @@ export function EditorPane({ editorRef, onPlayingChange, onSaveStatus, live = fa
     };
   }, [editorRef]);
   useEffect(() => {
-    if (!live) liveMode.current?.controller.cancel();
-  }, [live]);
+    const controller = liveMode.current?.controller;
+    if (!live) return controller?.cancel();
+    // Edits made before Live was switched on count too: the music catches up after the usual pause.
+    const code = editorRef.current?.getCode();
+    if (code && playing.current) controller?.onEdit(code, { enabled: true, playing: true });
+  }, [live, editorRef]);
 
   const onStateChange = useCallback(
     (s: StrudelState) => {
@@ -69,6 +74,7 @@ export function EditorPane({ editorRef, onPlayingChange, onSaveStatus, live = fa
       // The editor's own text: a Live revert evaluates older code without changing what the user wrote.
       const code = editorRef.current?.getCode() ?? s.code;
       const controller = liveMode.current?.controller;
+      controller?.onPlayingChange(s.started);
       if (code && code !== "// LOADING") {
         localStorage.setItem(LOCAL_CODE_KEY, code);
         if (code !== lastCode.current) {
@@ -84,8 +90,8 @@ export function EditorPane({ editorRef, onPlayingChange, onSaveStatus, live = fa
   );
 
   const onEvaluated = useCallback((s: StrudelState) => {
-    if (reverting.current) {
-      reverting.current = false;
+    if (reverting.current !== null && s.activeCode === reverting.current) {
+      reverting.current = null;
       return;
     }
     const mode = liveMode.current;

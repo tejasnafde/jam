@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { LIVE_DEBOUNCE_MS, LIVE_VERSION_MS, LiveController, VersionCoalescer } from "./live";
+import { LIVE_DEBOUNCE_MS, LIVE_VERSION_MS, LiveController, serial, VersionCoalescer } from "./live";
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
@@ -96,5 +96,37 @@ describe("Live versions", () => {
     versions.explicit("mine");
     vi.advanceTimersByTime(LIVE_VERSION_MS * 2);
     expect(save.mock.calls).toEqual([["v1"], ["mine"]]);
+  });
+});
+
+describe("serial", () => {
+  it("runs jobs one at a time, in order, even when one fails", async () => {
+    vi.useRealTimers();
+    const run = serial();
+    const log: string[] = [];
+    const job =
+      (name: string, fail = false) =>
+      async () => {
+        log.push(`start ${name}`);
+        await new Promise((r) => setTimeout(r, 5));
+        log.push(`end ${name}`);
+        if (fail) throw new Error(name);
+        return name;
+      };
+    const a = run(job("a", true));
+    const b = run(job("b"));
+    await expect(a).rejects.toThrow("a");
+    expect(await b).toBe("b");
+    expect(log).toEqual(["start a", "end a", "start b", "end b"]);
+  });
+});
+
+describe("stopping", () => {
+  it("drops a Live evaluation that waits from before the stop", () => {
+    const { live, evaluate } = setup();
+    live.onEdit("a", on);
+    live.onPlayingChange(false);
+    vi.advanceTimersByTime(LIVE_DEBOUNCE_MS * 2);
+    expect(evaluate).not.toHaveBeenCalled();
   });
 });

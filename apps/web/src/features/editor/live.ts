@@ -93,10 +93,28 @@ export class LiveController {
     return this.liveTry;
   }
 
+  /** The music stopped or started. A Live evaluation waiting from before a stop is dropped. */
+  onPlayingChange(playing: boolean) {
+    if (!playing) this.cancel();
+  }
+
   cancel() {
     if (this.timer !== null) this.timers.clearTimeout(this.timer);
     this.timer = null;
   }
+}
+
+/**
+ * Runs async jobs one after another. Strudel reports an evaluation through one pending flag, so two
+ * evaluations that overlap would report once; one at a time, each one reports.
+ */
+export function serial() {
+  let tail: Promise<unknown> = Promise.resolve();
+  return <T>(job: () => Promise<T>): Promise<T> => {
+    const run = tail.then(job);
+    tail = run.catch(() => undefined);
+    return run;
+  };
 }
 
 /**

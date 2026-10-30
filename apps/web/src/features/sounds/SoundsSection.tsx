@@ -4,6 +4,7 @@ import { useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "r
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { searchCatalog, type Catalog, type DrumMachine, type SoundItem } from "./catalog";
 import { setDraggedSound, SOUND_MIME } from "./dragState";
@@ -93,12 +94,22 @@ function SoundRow({
         {fact && <span className="truncate text-xs text-muted-foreground">{fact}</span>}
       </button>
       <span className="flex flex-none items-center text-muted-foreground transition-colors group-focus-within:text-foreground group-hover:text-foreground">
-        <Button variant="ghost" size="icon-sm" onClick={onInsert} aria-label={`Insert ${snippet} at cursor`}>
-          <TextCursorInput />
-        </Button>
-        <Button variant="ghost" size="icon-sm" onClick={copy} aria-label={copied ? "Copied" : `Copy ${snippet}`}>
-          {copied ? <Check className="text-water" /> : <Copy />}
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon-sm" onClick={onInsert} aria-label={`Insert ${snippet} at cursor`}>
+              <TextCursorInput />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Insert at cursor</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon-sm" onClick={copy} aria-label={copied ? "Copied" : `Copy ${snippet}`}>
+              {copied ? <Check className="text-water" /> : <Copy />}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{copied ? "Copied" : "Copy the code"}</TooltipContent>
+        </Tooltip>
       </span>
     </li>
   );
@@ -158,15 +169,18 @@ function MachineRow({
   open,
   onToggle,
   row,
+  matched,
 }: {
   machine: DrumMachine;
   open: boolean;
   onToggle: () => void;
   row: (item: SoundItem) => ReactNode;
+  /** A search matched only some parts: their names show in the fact line, so a closed row shows the hit. */
+  matched: boolean;
 }) {
-  const fact = [machine.alias, `${machine.parts.length} ${machine.parts.length === 1 ? "part" : "parts"}`]
-    .filter(Boolean)
-    .join(" · ");
+  const n = machine.parts.length;
+  const parts = matched ? machine.parts.map((p) => p.name).join(" ") : `${n} ${n === 1 ? "part" : "parts"}`;
+  const fact = [machine.alias, parts].filter(Boolean).join(" · ");
   return (
     <li className="border-b border-hairline last:border-0">
       <button
@@ -257,9 +271,10 @@ export function SoundsSection({ catalog, source, onInsert }: Props) {
         <>
           <ul aria-label="Drum machines">
             {found.machines.slice(0, limit("machines")).map((m) => {
-              // A search that picks parts out of a few machines opens them; "kick" across 70 machines does not.
-              const byDefault =
-                searching && found.machines.length <= AUTO_OPEN && m.parts.length < catalogParts(catalog, m.name);
+              // A search that picks parts out of a few machines opens them; "kick" across 70 machines does not,
+              // but each closed row names the parts it matched.
+              const matched = searching && m.parts.length < catalogParts(catalog, m.name);
+              const byDefault = matched && found.machines.length <= AUTO_OPEN;
               return (
                 <MachineRow
                   key={m.name}
@@ -267,6 +282,7 @@ export function SoundsSection({ catalog, source, onInsert }: Props) {
                   open={isOpen(`m:${m.name}`, byDefault)}
                   onToggle={() => toggle(`m:${m.name}`, byDefault)}
                   row={row}
+                  matched={matched}
                 />
               );
             })}
@@ -331,6 +347,9 @@ export function SoundsSection({ catalog, source, onInsert }: Props) {
       </div>
       <p className="text-xs leading-relaxed text-muted-foreground max-md:hidden">
         Click to hear a sound. Drag it into your code, or use the cursor button.
+      </p>
+      <p className="text-xs leading-relaxed text-muted-foreground md:hidden">
+        Tap a sound to hear it. The cursor button puts it in your code, the copy button copies it.
       </p>
     </div>
   );

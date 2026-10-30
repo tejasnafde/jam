@@ -11,10 +11,12 @@ interface Props {
 
 /**
  * Shows an evaluation error the Bob Ross way: as a happy accident. A slim bar docked under the
- * editor, so it never covers the code. Dismissed per message; a new error shows again.
+ * editor, so it never covers the code. Dismissed per message; a new error shows again, and so does
+ * the same error after a good evaluation cleared it.
  */
 export function EvalNote({ message, onGoToLine }: Props) {
   const [dismissed, setDismissed] = useState<string | null>(null);
+  if (!message && dismissed !== null) setDismissed(null);
   if (!message || dismissed === message) return null;
   const line = errorLine(message);
   return (
