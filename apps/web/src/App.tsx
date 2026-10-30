@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { SaveStatus } from "@/components/SaveStatus";
 import { SidePanel, type SidePanelProps } from "@/components/SidePanel";
@@ -11,11 +11,13 @@ import { useGrants } from "@/features/connect/useGrants";
 import { useTokens } from "@/features/connect/useTokens";
 import { sortDroppedFiles } from "@/features/library/sampleFile";
 import { useSamples } from "@/features/library/useSamples";
-import { EditorPane } from "@/features/editor/EditorPane";
+import { EditorPane, type EditorControl } from "@/features/editor/EditorPane";
 import type { StrudelEditorHandle } from "@/features/editor/StrudelEditor";
 import type { SaveStatus as Status } from "@/features/editor/useEvaluationRecorder";
 import { usePlan } from "@/features/plan/usePlan";
 import { usePrep } from "@/features/prep/usePrep";
+import { SessionName } from "@/features/sessions/SessionName";
+import { useSessions, type EditorBridge } from "@/features/sessions/useSessions";
 import { preventFileNavigation } from "@/features/sounds/dragState";
 import { useLocalStorageFlag } from "@/hooks/useLocalStorage";
 import { cn } from "@/lib/utils";
@@ -25,7 +27,6 @@ export type PanelOverride = Partial<SidePanelProps>;
 
 export function App({ panelOverride }: { panelOverride?: PanelOverride }) {
   const auth = useAuth();
-  const plan = usePlan(auth.api);
   const tokens = useTokens(auth.api);
   const grants = useGrants(auth.api);
   const library = useSamples(auth.api);
@@ -34,6 +35,20 @@ export function App({ panelOverride }: { panelOverride?: PanelOverride }) {
   const onPrepDone = useCallback(() => void refresh().catch(console.error), [refresh]);
   const prep = usePrep(auth.api, onPrepDone);
   const editor = useRef<StrudelEditorHandle | null>(null);
+  const control = useRef<EditorControl | null>(null);
+  const bridge = useMemo<EditorBridge>(
+    () => ({
+      getCode: () => editor.current?.getCode() ?? null,
+      replaceCode: (code) => control.current?.replaceCode(code),
+      flushVersions: () => control.current?.flushVersions(),
+      stopLive: () => control.current?.stopLive(),
+    }),
+    [],
+  );
+  const sessions = useSessions(auth.api, bridge);
+  const { refresh: refreshSessions } = sessions;
+  const onVersionSaved = useCallback(() => void refreshSessions().catch(console.error), [refreshSessions]);
+  const plan = usePlan(auth.api, sessions.handle.currentId);
   const [playing, setPlaying] = useState(false);
   const [panelOpen, setPanelOpen] = useLocalStorageFlag("jam:panel", true);
   const [live, setLive] = useLocalStorageFlag("jam:live", false);
@@ -64,6 +79,7 @@ export function App({ panelOverride }: { panelOverride?: PanelOverride }) {
     onUploadSample: (file) => void library.upload(file),
     onDeleteSample: (id) => void library.remove(id),
     prep,
+    sessions: sessions.handle,
     ...panelOverride,
   };
 
@@ -98,6 +114,8 @@ export function App({ panelOverride }: { panelOverride?: PanelOverride }) {
     </Button>
   );
 
+  const sessionName = panel.profile && panel.sessions ? <SessionName sessions={panel.sessions} /> : null;
+
   return (
     <div className="flex h-dvh flex-col max-md:h-auto max-md:min-h-dvh">
       <TopBar
@@ -108,12 +126,16 @@ export function App({ panelOverride }: { panelOverride?: PanelOverride }) {
           setLive(on);
           if (on && !playing) toast("Live is on. Press play, and the music follows your typing.");
         }}
+        session={sessionName}
         panelOpen={panelOpen}
         onTogglePanel={() => setPanelOpen(!panelOpen)}
         status={<SaveStatus status={status.value} stamp={status.stamp} />}
         tools={<Booth getCps={() => editor.current?.getCps() ?? null} library={library} />}
         account={account}
       />
+      {sessionName && (
+        <div className="flex h-10 flex-none items-center border-b border-hairline px-2 md:hidden">{sessionName}</div>
+      )}
       <main
         className={cn(
           "grid min-h-0 flex-1 max-md:flex max-md:flex-col",
@@ -127,6 +149,12 @@ export function App({ panelOverride }: { panelOverride?: PanelOverride }) {
             onSaveStatus={onSaveStatus}
             live={live}
             onDropFiles={uploadDropped}
+            controlRef={control}
+            onEdit={sessions.onEdit}
+            getSessionId={sessions.getSessionId}
+            onVersionSaved={onVersionSaved}
+            onSessionGone={sessions.onSessionGone}
+            onEvalError={sessions.reportError}
           />
         </div>
         <div className={cn("min-h-0 md:h-full", !panelOpen && "md:hidden")}>

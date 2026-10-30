@@ -140,13 +140,13 @@ export class VersionCoalescer {
   /** A version from a Ctrl+Enter: saved now. */
   explicit(code: string) {
     this.drop();
-    this.flush(code);
+    this.flushCode(code);
   }
 
   /** A version from Live mode: saved now, or held until the window ends (latest wins). */
   live(code: string) {
     const wait = this.lastSave + this.windowMs - this.now();
-    if (wait <= 0 && this.timer === null) return this.flush(code);
+    if (wait <= 0 && this.timer === null) return this.flushCode(code);
     this.pending = code;
     if (this.timer === null) {
       this.timer = this.timers.setTimeout(
@@ -154,14 +154,21 @@ export class VersionCoalescer {
           this.timer = null;
           const c = this.pending;
           this.pending = null;
-          if (c !== null) this.flush(c);
+          if (c !== null) this.flushCode(c);
         },
         Math.max(0, wait),
       );
     }
   }
 
-  private flush(code: string) {
+  /** Saves a waiting Live version now. For a session switch: the version belongs to the session the user leaves. */
+  flush() {
+    const code = this.pending;
+    this.drop();
+    if (code !== null) this.save(code);
+  }
+
+  private flushCode(code: string) {
     this.lastSave = this.now();
     this.save(code);
   }
