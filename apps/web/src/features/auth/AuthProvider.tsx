@@ -1,6 +1,7 @@
 import { onAuthStateChanged, signInWithPopup, signOut as fbSignOut, type User } from "firebase/auth";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { toast } from "sonner";
+import { track } from "@/lib/analytics";
 import { createApi } from "@/lib/api";
 import { auth, googleProvider } from "@/lib/firebase";
 import { AuthContext, type AuthState } from "./authContext";
@@ -24,6 +25,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const signIn = async () => {
       try {
         await signInWithPopup(auth, googleProvider);
+        track("sign_in_completed");
       } catch (err) {
         const code = (err as { code?: string }).code ?? "";
         if (!QUIET_ERRORS.has(code)) toast.error("Sign-in did not work", { description: String(err) });
