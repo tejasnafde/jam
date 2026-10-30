@@ -1,4 +1,13 @@
-import type { AudioReading, AudioSnapshot, CodeVersion, PlanInput, SessionPlan } from "@jam/shared";
+import type {
+  AudioReading,
+  AudioSnapshot,
+  CodeVersion,
+  PlanInput,
+  Session,
+  SessionError,
+  SessionPlan,
+  SessionSummary,
+} from "@jam/shared";
 
 export interface TokenRecord {
   /** The SHA-256 hash of the token, which is also the document id. */
@@ -85,6 +94,7 @@ export interface OAuthTokenRecord {
 }
 
 export type NewAudioSnapshot = AudioReading & { versionId: string | null; windowMs: number };
+export type SessionPatch = Partial<Pick<Session, "name" | "lastCode">>;
 export type PlanPatch = Partial<Pick<SessionPlan, "currentStage" | "note">>;
 
 /**
@@ -92,18 +102,45 @@ export type PlanPatch = Partial<Pick<SessionPlan, "currentStage" | "note">>;
  * kept in process memory in production.
  */
 export interface Store extends OAuthStore {
-  /** Identical code to the latest version bumps its counter instead of adding a row. */
-  saveVersion(uid: string, code: string, email?: string): Promise<CodeVersion>;
-  latestVersion(uid: string): Promise<CodeVersion | null>;
-  /** Newest first. */
-  listVersions(uid: string, limit: number): Promise<CodeVersion[]>;
+  /**
+   * Saves an evaluation in a session (the current one when sessionId is left out) and
+   * makes it the session's lastCode. A good evaluation clears the session's lastError. Identical code to the session's latest version bumps
+   * its counter instead of adding a row. Null when the session does not exist.
+   */
+  saveVersion(uid: string, code: string, opts?: { email?: string; sessionId?: string }): Promise<CodeVersion | null>;
+  /** The latest version of a session, the current one by default. */
+  latestVersion(uid: string, sessionId?: string): Promise<CodeVersion | null>;
+  /** Newest first, in one session (the current one by default). `before` is a createdAt cursor. */
+  listVersions(uid: string, limit: number, opts?: { sessionId?: string; before?: string }): Promise<CodeVersion[]>;
   saveAudio(uid: string, snapshot: NewAudioSnapshot): Promise<AudioSnapshot>;
   /** Newest first. */
   listAudio(uid: string, limit: number): Promise<AudioSnapshot[]>;
-  /** Starts a new plan at stage 0. Older plans are kept. */
-  savePlan(uid: string, plan: PlanInput): Promise<SessionPlan>;
-  currentPlan(uid: string): Promise<SessionPlan | null>;
+  /** Starts a new plan at stage 0 for a session (the current one by default). Older plans are kept. */
+  savePlan(uid: string, plan: PlanInput, sessionId?: string): Promise<SessionPlan>;
+  /** The plan of a session, the current one by default. */
+  currentPlan(uid: string, sessionId?: string): Promise<SessionPlan | null>;
   updatePlan(uid: string, planId: string, patch: PlanPatch): Promise<SessionPlan>;
+  /** Newest edit first. Light: no lastCode and no lastError. */
+  listSessions(uid: string): Promise<SessionSummary[]>;
+  getSession(uid: string, id: string): Promise<Session | null>;
+  /**
+   * The session the user has open. When none is set, the most recently edited one. When the
+   * user has none, an "Untitled" session is made, and it claims every version and plan from
+   * before sessions.
+   */
+  currentSession(uid: string): Promise<Session>;
+  /** Makes a session and opens it. */
+  createSession(uid: string, input: { name: string; lastCode: string }): Promise<Session>;
+  /** Null when the session does not exist (or belongs to someone else). */
+  updateSession(uid: string, id: string, patch: SessionPatch): Promise<Session | null>;
+  /** Saves the editor text of the session the user leaves, then makes `id` current. */
+  openSession(uid: string, id: string, previous?: { id: string; lastCode: string }): Promise<Session | null>;
+  /** A copy of the code and the plan under a new name. Versions stay with the original. */
+  duplicateSession(uid: string, id: string, name: string): Promise<Session | null>;
+  /** Saves (or with null clears) the session's last failed evaluation. False when the session does not exist. */
+  setSessionError(uid: string, id: string, error: SessionError | null): Promise<boolean>;
+  /** Deletes the session with its versions and plans. False when it does not exist. */
+  deleteSession(uid: string, id: string): Promise<boolean>;
   createToken(hash: string, uid: string, label: string): Promise<TokenRecord>;
   findToken(hash: string): Promise<TokenRecord | null>;
   touchToken(hash: string): Promise<void>;

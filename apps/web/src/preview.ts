@@ -1,6 +1,59 @@
 // Fixture data for the dev-only ?preview mode (layout screenshots). Never bundled in production.
-import type { SampleWithUrl } from "@jam/shared";
+import type { SampleWithUrl, Session, VersionEntry } from "@jam/shared";
+import type { SessionsHandle } from "./features/sessions/useSessions";
 import type { PanelOverride } from "./App";
+
+const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
+
+const session = (id: string, name: string, versionCount: number, minutes: number): Session => ({
+  id,
+  name,
+  createdAt: ago(minutes + 600),
+  updatedAt: ago(minutes),
+  lastCode: "",
+  versionCount,
+  planId: null,
+});
+
+const VERSION_LINES = [
+  '$: s("hh*8").gain(.4).degradeBy(.3)',
+  'note("<c3 eb3 g3 bb3>").s("gm_epiano1").room(.4)',
+  "removed: .lpf(700)",
+  's("bd ~ ~ bd, ~ sd").bank("RolandTR909").swingBy(1/3, 4)',
+  "setcpm(84/4)",
+  '$: note("<c2 eb2 g1 bb1>").s("sawtooth").lpf(500)',
+];
+
+const versions: VersionEntry[] = Array.from({ length: 24 }, (_, i) => ({
+  id: `v${i}`,
+  code: `setcpm(84/4)\n\n$: s("bd ~ ~ bd, ~ sd").bank("RolandTR909")\n\n${VERSION_LINES[i % VERSION_LINES.length]}\n`,
+  createdAt: ago(4 + i * 7),
+  evaluatedAt: ago(4 + i * 7),
+  evalCount: 1,
+  summary: VERSION_LINES[i % VERSION_LINES.length] as string,
+}));
+
+const noop = async () => {};
+
+export const PREVIEW_SESSIONS: SessionsHandle = {
+  sessions: [
+    session("s1", "Rainy lofi loop", 24, 4),
+    session("s2", "Night drive, slower", 9, 60 * 26),
+    session("untitled", "Untitled", 3, 60 * 24 * 6),
+  ],
+  currentId: "s1",
+  create: noop,
+  open: noop,
+  rename: noop,
+  duplicate: noop,
+  remove: noop,
+  restore: noop,
+  loadVersions: async (_id, before) => {
+    const start = before ? versions.findIndex((v) => v.createdAt === before) + 1 : 0;
+    const page = versions.slice(start, start + 10);
+    return { versions: page, nextBefore: start + 10 < versions.length ? (page.at(-1)?.createdAt ?? null) : null };
+  },
+};
 
 /** ?preview=empty: signed in, nothing made yet. ?preview (or ?preview=active): a session in progress. */
 export function previewPanel(state: string | null): PanelOverride {
@@ -13,6 +66,7 @@ export function previewPanel(state: string | null): PanelOverride {
     freshToken: null,
     samples: [],
     prep: { jobs: {}, start: async () => {} },
+    sessions: { ...PREVIEW_SESSIONS, sessions: [PREVIEW_SESSIONS.sessions[2] as Session], currentId: "untitled" },
   };
 }
 
@@ -52,6 +106,7 @@ export const PREVIEW_PANEL: PanelOverride = {
     sample("s2", "nightdrive", "upload", 212.6, { bpm: 92, key: "A minor" }),
     sample("s3", "nightdrive_vocals", "stem", 212.6, { bpm: 92, key: "A minor", stem: "vocals", parentId: "s2" }),
   ],
+  sessions: PREVIEW_SESSIONS,
   uploadingSample: false,
   onUploadSample: () => {},
   onDeleteSample: () => {},

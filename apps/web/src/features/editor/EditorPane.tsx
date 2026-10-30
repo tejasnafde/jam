@@ -7,6 +7,16 @@ import { StrudelEditor, type StrudelEditorHandle } from "./StrudelEditor";
 import type { StrudelState } from "./strudelTypes";
 import { useEvaluationRecorder, type SaveStatus } from "./useEvaluationRecorder";
 
+/** What the sessions can do to the editor. None of it evaluates. */
+export interface EditorControl {
+  /** Replaces the text. Live mode does not treat it as typing, so it is not evaluated. */
+  replaceCode(code: string): void;
+  /** Saves a Live version that waits for its window now. */
+  flushVersions(): void;
+  /** Stops the music when Live mode plays, so a session switch does not keep the old piece going. */
+  stopLive(): void;
+}
+
 interface Props {
   /** Owned by the parent, so the top bar can play and stop. */
   editorRef: RefObject<StrudelEditorHandle | null>;
@@ -16,11 +26,34 @@ interface Props {
   live?: boolean;
   /** Uploads audio files dropped on the editor. Resolves to the new sample names. */
   onDropFiles?: (files: File[]) => Promise<string[]>;
+  /** Filled in by the pane, for the sessions. */
+  controlRef?: RefObject<EditorControl | null>;
+  /** The user changed the text (not a replaceCode). */
+  onEdit?: (code: string) => void;
+  /** The open session, read when a version is saved. */
+  getSessionId?: () => string | null;
+  onVersionSaved?: () => void;
+  /** The open session was deleted elsewhere: resolves once the code has a new session. */
+  onSessionGone?: () => Promise<void>;
+  /** An evaluation failed (syntax or runtime): the code and the message the error bar shows. */
+  onEvalError?: (code: string, message: string) => void;
 }
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
-export function EditorPane({ editorRef, onPlayingChange, onSaveStatus, live = false, onDropFiles }: Props) {
+export function EditorPane({
+  editorRef,
+  onPlayingChange,
+  onSaveStatus,
+  live = false,
+  onDropFiles,
+  controlRef,
+  onEdit,
+  getSessionId,
+  onVersionSaved,
+  onSessionGone,
+  onEvalError,
+}: Props) {
   const { api } = useAuth();
   const [note, setNote] = useState<string | null>(null);
   // A runtime error that Live mode took back: the music went back to the last good code,
@@ -32,11 +65,34 @@ export function EditorPane({ editorRef, onPlayingChange, onSaveStatus, live = fa
   // The code a Live revert put back, until its evaluation reports.
   const reverting = useRef<string | null>(null);
 
-  const record = useEvaluationRecorder(api, () => playing.current, onSaveStatus);
+  // Code waiting for the editor to load (a session opened before Strudel was ready).
+  const pending = useRef<string | null>(null);
+
+  const record = useEvaluationRecorder(
+    api,
+    () => playing.current,
+    onSaveStatus,
+    getSessionId,
+    onVersionSaved,
+    onSessionGone,
+  );
   const recordRef = useRef(record);
+  const onEditRef = useRef(onEdit);
+  const onEvalErrorRef = useRef(onEvalError);
+  // The last error reported, so one failure is sent once, not on every state update.
+  const reported = useRef<string | null>(null);
+  const reportError = useCallback((code: string, err: unknown) => {
+    const message = errorText(err);
+    const key = `${message}\n${code}`;
+    if (reported.current === key) return;
+    reported.current = key;
+    onEvalErrorRef.current?.(code, message);
+  }, []);
   useLayoutEffect(() => {
+    onEvalErrorRef.current = onEvalError;
     recordRef.current = record;
     liveRef.current = live;
+    onEditRef.current = onEdit;
   });
 
   // Built once the editor is mounted: the controller evaluates through the editor handle.
@@ -65,6 +121,41 @@ export function EditorPane({ editorRef, onPlayingChange, onSaveStatus, live = fa
     if (code && playing.current) controller?.onEdit(code, { enabled: true, playing: true });
   }, [live, editorRef]);
 
+  useEffect(() => {
+    if (!controlRef) return;
+    let frame = 0;
+    const apply = () => {
+      frame = 0;
+      const code = pending.current;
+      if (code === null) return;
+      if (editorRef.current?.getCode() == null) {
+        frame = requestAnimationFrame(apply);
+        return;
+      }
+      pending.current = null;
+      // Marked as seen first, so the change does not look like typing to Live mode.
+      lastCode.current = code;
+      localStorage.setItem(LOCAL_CODE_KEY, code);
+      editorRef.current.setCode(code);
+    };
+    controlRef.current = {
+      replaceCode: (code) => {
+        pending.current = code;
+        if (!frame) apply();
+      },
+      flushVersions: () => liveMode.current?.versions.flush(),
+      stopLive: () => {
+        if (!liveRef.current || !playing.current) return;
+        liveMode.current?.controller.cancel();
+        void editorRef.current?.stop();
+      },
+    };
+    return () => {
+      cancelAnimationFrame(frame);
+      controlRef.current = null;
+    };
+  }, [controlRef, editorRef]);
+
   const onStateChange = useCallback(
     (s: StrudelState) => {
       if (s.started !== playing.current) {
@@ -77,44 +168,44 @@ export function EditorPane({ editorRef, onPlayingChange, onSaveStatus, live = fa
       controller?.onPlayingChange(s.started);
       if (code && code !== "// LOADING") {
         localStorage.setItem(LOCAL_CODE_KEY, code);
+        // The first text seen is what the editor loaded with, not an edit.
+        if (lastCode.current === null) lastCode.current = code;
         if (code !== lastCode.current) {
           lastCode.current = code;
           controller?.onEdit(code, { enabled: liveRef.current, playing: s.started });
+          onEditRef.current?.(code);
         }
       }
+      if (s.schedulerError) reportError(s.activeCode, s.schedulerError);
       if (s.schedulerError && controller?.onSchedulerError(s.activeCode)) setLiveNote(errorText(s.schedulerError));
       const err = s.evalError ?? s.schedulerError;
       setNote(err ? errorText(err) : null);
     },
-    [onPlayingChange, editorRef],
+    [onPlayingChange, editorRef, reportError],
   );
 
-  const onEvaluated = useCallback((s: StrudelState) => {
-    if (reverting.current !== null && s.activeCode === reverting.current) {
-      reverting.current = null;
-      return;
-    }
-    const mode = liveMode.current;
-    if (!mode) return;
-    const { controller, versions } = mode;
-    if (s.evalError) return controller.onEvalError(s.code);
-    const wasLive = controller.evaluatingLive;
-    controller.onEvaluated(s.activeCode);
-    setLiveNote(null);
-    if (wasLive) versions.live(s.activeCode);
-    else versions.explicit(s.activeCode);
-  }, []);
-
-  // Bring back the last saved jam on sign-in, unless the user already has their own code here.
-  useEffect(() => {
-    if (!api) return;
-    const local = localStorage.getItem(LOCAL_CODE_KEY);
-    if (local && local !== DEFAULT_CODE) return;
-    api
-      .latestVersion()
-      .then((latest) => latest && editorRef.current?.setCode(latest.code))
-      .catch(console.error);
-  }, [api, editorRef]);
+  const onEvaluated = useCallback(
+    (s: StrudelState) => {
+      if (reverting.current !== null && s.activeCode === reverting.current) {
+        reverting.current = null;
+        return;
+      }
+      const mode = liveMode.current;
+      if (!mode) return;
+      const { controller, versions } = mode;
+      if (s.evalError) {
+        reportError(s.code, s.evalError);
+        return controller.onEvalError(s.code);
+      }
+      reported.current = null;
+      const wasLive = controller.evaluatingLive;
+      controller.onEvaluated(s.activeCode);
+      setLiveNote(null);
+      if (wasLive) versions.live(s.activeCode);
+      else versions.explicit(s.activeCode);
+    },
+    [reportError],
+  );
 
   return (
     <section className="relative flex min-h-0 min-w-0 flex-1 flex-col" aria-label="Code editor">

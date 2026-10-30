@@ -130,3 +130,25 @@ describe("stopping", () => {
     expect(evaluate).not.toHaveBeenCalled();
   });
 });
+
+describe("VersionCoalescer.flush", () => {
+  it("saves a waiting Live version at once, for the session the user leaves", () => {
+    const saved: string[] = [];
+    const timers = { setTimeout: () => 1, clearTimeout: () => {} };
+    let t = 0;
+    const c = new VersionCoalescer(
+      (code) => saved.push(code),
+      () => t,
+      timers,
+      10_000,
+    );
+    c.live("a");
+    t = 1000;
+    c.live("b");
+    expect(saved).toEqual(["a"]);
+    c.flush();
+    expect(saved).toEqual(["a", "b"]);
+    c.flush();
+    expect(saved).toEqual(["a", "b"]);
+  });
+});

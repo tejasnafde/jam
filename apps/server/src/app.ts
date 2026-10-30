@@ -9,6 +9,7 @@ import { mcpRouter } from "./routes/mcp.js";
 import { planRouter } from "./routes/plan.js";
 import { prepRouter } from "./routes/prep.js";
 import { samplesRouter } from "./routes/samples.js";
+import { sessionsRouter } from "./routes/sessions.js";
 import { staticRouter } from "./routes/static.js";
 import { tokensRouter } from "./routes/tokens.js";
 import { versionsRouter } from "./routes/versions.js";
@@ -76,6 +77,7 @@ export function createApp({
   api.use("/versions", versionsRouter(store));
   api.use("/audio", audioRouter(store));
   api.use("/plan", planRouter(store));
+  api.use("/sessions", sessionsRouter(store));
   api.use("/tokens", tokensRouter(store, log));
   api.use("/samples", samplesRouter(samples, blobs, log));
   api.use("/prep", prepRouter(samples, prep.store, prep.run, log));

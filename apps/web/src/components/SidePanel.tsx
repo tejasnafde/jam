@@ -6,6 +6,8 @@ import type { Profile } from "@/features/auth/authContext";
 import { ConnectSection } from "@/features/connect/ConnectSection";
 import { LibrarySection } from "@/features/library/LibrarySection";
 import { PlanSection } from "@/features/plan/PlanSection";
+import { SessionsSection } from "@/features/sessions/SessionsSection";
+import type { SessionsHandle } from "@/features/sessions/useSessions";
 import type { PrepHandle } from "@/features/prep/usePrep";
 import { soundCount, type SoundItem } from "@/features/sounds/catalog";
 import { SoundsSection } from "@/features/sounds/SoundsSection";
@@ -30,6 +32,7 @@ export interface SidePanelProps {
   onUploadSample: (file: File) => void;
   onDeleteSample: (id: string) => void;
   prep?: PrepHandle;
+  sessions?: SessionsHandle;
   /** Inserts a sound at the editor's cursor. False when the editor is not ready. */
   onInsertSound?: (item: SoundItem) => boolean;
 }
@@ -50,6 +53,9 @@ export function SidePanel(props: SidePanelProps) {
   const [soundsOpen, setSoundsOpen] = useLocalStorageFlag("jam:sounds", true);
   const soundsMeta = sounds.source === "loading" ? "Loading" : count(soundCount(sounds.catalog), "sound", "sounds");
 
+  const [sessionsOpen, setSessionsOpen] = useLocalStorageFlag("jam:sessions", true);
+  const sessionCount = props.sessions?.sessions.length ?? 0;
+
   const connected = tokens.length + grants.length;
   const planMeta = plan
     ? plan.currentStage >= plan.stages.length
@@ -65,6 +71,16 @@ export function SidePanel(props: SidePanelProps) {
           <PanelCard title="Today we paint" coach meta={planMeta}>
             <PlanSection plan={plan} signedIn={!!profile} />
           </PanelCard>
+          {props.sessions && (
+            <PanelCard
+              title="Sessions"
+              meta={profile && sessionCount > 0 ? count(sessionCount, "session", "sessions") : undefined}
+              open={sessionsOpen}
+              onOpenChange={setSessionsOpen}
+            >
+              <SessionsSection signedIn={!!profile} sessions={props.sessions} />
+            </PanelCard>
+          )}
           <PanelCard title="Sounds" meta={soundsMeta} open={soundsOpen} onOpenChange={setSoundsOpen}>
             <SoundsSection
               catalog={sounds.catalog}
