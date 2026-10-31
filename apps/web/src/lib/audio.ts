@@ -1,10 +1,29 @@
 // Audio stats from Strudel's output.
 //
 // The Strudel REPL bundle keeps its AudioContext private, so we tap it from
-// outside: every connect() to an AudioDestinationNode also feeds one shared
-// AnalyserNode on that context. This must run before Strudel creates any node.
+// outside: every connect() to an AudioDestinationNode also feeds an
+// AnalyserNode on that context (one per context). This must run before
+// Strudel creates any node.
+//
+// Other contexts connect to a destination too: Strudel renders each reverb in
+// an OfflineAudioContext, and the vocal booth has its own AudioContext. Those
+// must never replace the music's analyser, or every reading after the first
+// .room() is silence. So offline contexts are not tapped, and readings come
+// from Strudel's own context when Strudel is loaded.
 
-let analyser: AnalyserNode | null = null;
+const analysers = new WeakMap<BaseAudioContext, AnalyserNode>();
+let latest: AnalyserNode | null = null;
+
+/** Strudel's context, from the globals the REPL's prebake sets. Null before Strudel loads. */
+function musicContext(): BaseAudioContext | null {
+  const get = (globalThis as { getAudioContext?: () => BaseAudioContext }).getAudioContext;
+  return typeof get === "function" ? get() : null;
+}
+
+function currentAnalyser(): AnalyserNode | null {
+  const ctx = musicContext();
+  return (ctx && analysers.get(ctx)) ?? latest;
+}
 
 export function installAudioTap() {
   const proto = AudioNode.prototype as AudioNode & { __jamTapped?: boolean };
@@ -14,15 +33,20 @@ export function installAudioTap() {
   proto.connect = function (this: AudioNode, ...args: unknown[]) {
     const result = original.apply(this, args);
     const dest = args[0];
-    if (dest instanceof AudioDestinationNode && this !== analyser) {
-      const ctx = this.context as AudioContext;
-      if (!analyser || analyser.context !== ctx) {
-        analyser = ctx.createAnalyser();
-        analyser.fftSize = 2048;
-        analyser.smoothingTimeConstant = 0.6;
-      }
-      original.call(this, analyser);
+    const ctx = this.context;
+    if (!(dest instanceof AudioDestinationNode)) return result;
+    // An offline render is never heard.
+    if (typeof OfflineAudioContext !== "undefined" && ctx instanceof OfflineAudioContext) return result;
+    let analyser = analysers.get(ctx);
+    if (this === analyser) return result;
+    if (!analyser) {
+      analyser = ctx.createAnalyser();
+      analyser.fftSize = 2048;
+      analyser.smoothingTimeConstant = 0.6;
+      analysers.set(ctx, analyser);
     }
+    latest = analyser;
+    original.call(this, analyser);
     return result;
   } as typeof proto.connect;
 }
@@ -40,8 +64,8 @@ let freqBuf: Float32Array<ArrayBuffer> | null = null;
 
 /** One instant reading, or null before any sound has been routed. */
 export function read(): Reading | null {
-  if (!analyser) return null;
-  const a = analyser;
+  const a = currentAnalyser();
+  if (!a) return null;
   if (!timeBuf || timeBuf.length !== a.fftSize) timeBuf = new Float32Array(a.fftSize);
   if (!freqBuf || freqBuf.length !== a.frequencyBinCount) freqBuf = new Float32Array(a.frequencyBinCount);
   a.getFloatTimeDomainData(timeBuf);
