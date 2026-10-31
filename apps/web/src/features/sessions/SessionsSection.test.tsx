@@ -95,3 +95,42 @@ describe("SessionsSection", () => {
     expect(screen.getByText(/Sign in to keep named sessions/)).toBeInTheDocument();
   });
 });
+
+describe("SessionsSection share links", () => {
+  const share = (id: string, title: string, enabled: boolean) => ({
+    id,
+    sessionId: "a",
+    versionId: "v2",
+    title,
+    ownerName: "Tejas",
+    asOf: "2026-10-01T10:05:00Z",
+    bars: 24,
+    seconds: 38.4,
+    showCode: false,
+    enabled,
+    createdAt: new Date(Date.now() - 10 * 60_000).toISOString(),
+    plays: 3,
+  });
+
+  it("lists a session's links with length and plays, and turns them off and on", () => {
+    const shares = {
+      shares: [share("aaaaaaaaaa", "Loop for Sam", true), share("bbbbbbbbbb", "Old sketch", false)],
+      setEnabled: vi.fn(async () => {}),
+      added: vi.fn(),
+    };
+    render(<SessionsSection signedIn sessions={handle()} shares={shares} />);
+    const list = screen.getByRole("list", { name: "Links to Rainy loop" });
+    expect(list).toHaveTextContent("Loop for Sam");
+    expect(list).toHaveTextContent("0:38");
+    expect(list).toHaveTextContent("3 plays");
+    expect(screen.queryByRole("list", { name: "Links to Night drive" })).toBeNull();
+    // A turned-off link has no copy button.
+    expect(screen.getByRole("button", { name: "Copy link to Loop for Sam" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Copy link to Old sketch" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Turn off the link to Loop for Sam" }));
+    expect(shares.setEnabled).toHaveBeenCalledWith("aaaaaaaaaa", false);
+    fireEvent.click(screen.getByRole("button", { name: "Turn on the link to Old sketch" }));
+    expect(shares.setEnabled).toHaveBeenCalledWith("bbbbbbbbbb", true);
+  });
+});
