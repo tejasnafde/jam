@@ -35,11 +35,26 @@ export interface StrudelMirror {
   code?: string;
   editor?: EditorViewLike;
   repl?: {
-    scheduler?: { cps?: number };
+    scheduler?: Scheduler;
     evaluate?: (code: string, autostart?: boolean) => Promise<unknown>;
   };
 }
 
 export interface StrudelEditorElement extends HTMLElement {
   editor?: StrudelMirror;
+}
+
+/** The parts of Strudel's scheduler (Cyclist) that a share recording reads. */
+export interface Scheduler {
+  cps?: number;
+  started?: boolean;
+  /** The evaluated pattern. It stays after stop(). */
+  pattern?: unknown;
+  /** Seconds ahead of the clock that haps are scheduled. */
+  latency?: number;
+  /** The audio time of the first tick since start (or since a tempo change). */
+  seconds_at_cps_change?: number;
+  num_ticks_since_cps_change?: number;
+  start(): Promise<void> | void;
+  stop(): void;
 }

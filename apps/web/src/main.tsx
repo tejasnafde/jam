@@ -18,6 +18,12 @@ async function devPreview(): Promise<PanelOverride | undefined> {
  * Both pages load lazily, so the consent page does not download Strudel.
  */
 async function page(): Promise<ReactNode> {
+  // A share link: the listener page. It does not load Strudel, and it needs no sign-in.
+  const share = /^\/s\/([A-Za-z0-9_-]{1,64})\/?$/.exec(location.pathname);
+  if (share) {
+    const { SharePage } = await import("./features/share/SharePage");
+    return <SharePage id={share[1] ?? ""} />;
+  }
   if (location.pathname === "/authorize") {
     if (import.meta.env.DEV && params.has("preview")) {
       const { ConsentPreview } = await import("./features/consent/preview");

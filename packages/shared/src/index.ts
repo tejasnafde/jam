@@ -148,3 +148,4 @@ export * from "./prepRequest.js";
 export * from "./sounds.js";
 export * from "./sessions.js";
 export * from "./coach.js";
+export * from "./shares.js";

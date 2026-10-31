@@ -1,5 +1,6 @@
-import type { SessionSummary, VersionEntry } from "@jam/shared";
-import { ChevronRight, Copy, Ellipsis, Eye, Loader2, Pencil, Plus, Trash2, Undo2 } from "lucide-react";
+import { formatDuration, type SessionSummary, type Share, type VersionEntry } from "@jam/shared";
+import { Check, ChevronRight, Copy, Ellipsis, Eye, Link2, Loader2, Pencil, Plus, Trash2, Undo2 } from "lucide-react";
+import { toast } from "sonner";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,6 +20,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { PLAY_KEY } from "@/features/editor/defaultCode";
+import type { SharesHandle } from "@/features/share/useShares";
+import { shareLink } from "@/lib/share-api";
 import { cn } from "@/lib/utils";
 import { relativeTime, versionTime } from "./draft";
 import type { SessionsHandle } from "./useSessions";
@@ -26,6 +29,7 @@ import type { SessionsHandle } from "./useSessions";
 interface Props {
   signedIn: boolean;
   sessions: SessionsHandle;
+  shares?: SharesHandle;
 }
 
 const versionsText = (n: number) => (n === 1 ? "1 version" : `${n.toLocaleString()} versions`);
@@ -234,12 +238,110 @@ function VersionList({ session, sessions }: { session: SessionSummary; sessions:
   );
 }
 
+const playsText = (n: number) => (n === 1 ? "1 play" : `${n.toLocaleString()} plays`);
+
+/** One share link of a session: copy it, or turn it off (the file stays) and on again. */
+function ShareItem({ share, shares }: { share: Share; shares: SharesHandle }) {
+  const [copied, setCopied] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(shareLink(share.id));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
+    } catch {
+      toast.error("Could not copy the link.");
+    }
+  };
+  const toggle = async () => {
+    setBusy(true);
+    try {
+      await shares.setEnabled(share.id, !share.enabled);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const sep = (
+    <span className="text-gutter" aria-hidden="true">
+      /
+    </span>
+  );
+  return (
+    <li className="flex flex-col py-1">
+      <div className="flex items-center gap-1.5">
+        <Link2
+          className={cn("size-3.5 flex-none", share.enabled ? "text-water" : "text-muted-foreground")}
+          aria-hidden="true"
+        />
+        <p
+          className={cn("min-w-0 flex-1 truncate text-xs font-medium", !share.enabled && "opacity-60")}
+          title={share.title}
+        >
+          {share.title}
+        </p>
+        {share.enabled && (
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            className="text-muted-foreground"
+            onClick={() => void copy()}
+            aria-label={`Copy link to ${share.title}`}
+            title={copied ? "Copied" : "Copy link"}
+          >
+            {copied ? <Check className="text-water" /> : <Copy />}
+          </Button>
+        )}
+        <Button
+          variant="ghost"
+          size="xs"
+          disabled={busy}
+          className="text-muted-foreground"
+          onClick={() => void toggle()}
+          aria-label={`${share.enabled ? "Turn off" : "Turn on"} the link to ${share.title}`}
+          title={share.enabled ? "The page and its audio stop working. The file is kept." : undefined}
+        >
+          {share.enabled ? "Turn off" : "Turn on"}
+        </Button>
+      </div>
+      <p
+        className={cn(
+          "flex gap-1.5 truncate pl-5 text-[11px] text-muted-foreground tabular-nums",
+          !share.enabled && "opacity-60",
+        )}
+      >
+        <span>{formatDuration(share.seconds)}</span>
+        {sep}
+        <span>{playsText(share.plays)}</span>
+        {sep}
+        <span>{relativeTime(share.createdAt)}</span>
+        {!share.enabled && (
+          <>
+            {sep}
+            <span>off</span>
+          </>
+        )}
+      </p>
+    </li>
+  );
+}
+
+function ShareList({ session, list, shares }: { session: SessionSummary; list: Share[]; shares: SharesHandle }) {
+  return (
+    <ul aria-label={`Links to ${session.name}`} className="mb-2 ml-[30px] flex flex-col gap-0.5">
+      {list.map((share) => (
+        <ShareItem key={share.id} share={share} shares={shares} />
+      ))}
+    </ul>
+  );
+}
+
 function SessionRow({
   session,
   current,
   expanded,
   renaming,
   sessions,
+  shares,
   onToggle,
   onRenaming,
 }: {
@@ -248,6 +350,7 @@ function SessionRow({
   expanded: boolean;
   renaming: boolean;
   sessions: SessionsHandle;
+  shares?: SharesHandle;
   onToggle: () => void;
   onRenaming: (on: boolean) => void;
 }) {
@@ -326,6 +429,9 @@ function SessionRow({
           </DropdownMenu>
         </span>
       </div>
+      {shares && shares.shares.some((x) => x.sessionId === session.id) && (
+        <ShareList session={session} list={shares.shares.filter((x) => x.sessionId === session.id)} shares={shares} />
+      )}
       {expanded && (
         // A new version remounts the list, so it shows at the top.
         <VersionList key={session.versionCount} session={session} sessions={sessions} />
@@ -335,7 +441,7 @@ function SessionRow({
 }
 
 /** Named pieces: open one to continue it on any computer. The open one gets every new version. */
-export function SessionsSection({ signedIn, sessions }: Props) {
+export function SessionsSection({ signedIn, sessions, shares }: Props) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -374,6 +480,7 @@ export function SessionsSection({ signedIn, sessions }: Props) {
               expanded={expanded === s.id}
               renaming={renaming === s.id}
               sessions={sessions}
+              shares={shares}
               onToggle={() => setExpanded(expanded === s.id ? null : s.id)}
               onRenaming={(on) => setRenaming(on ? s.id : null)}
             />

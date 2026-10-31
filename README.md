@@ -65,6 +65,24 @@ stop typing. Expand a session to page through its versions: Preview shows the co
 the editor as a new edit (it does not play it). Versions from before sessions belong to a session named "Untitled",
 made on first load.
 
+### Share
+
+Share (top bar, after the code has played once) gives a friend a link to listen. It is read only, and the friend
+does not sign in.
+
+- **A frozen copy.** A share is a snapshot of the session's latest version. Later edits do not change it.
+- **One pass.** The dialog guesses the length of one pass of the playing `$:` pattern: the sum of an `arrange(...)`,
+  else the longest `<...>` sequence (with `!n` repeats), else 8 bars. It shows bars and m:ss at the current tempo, and
+  you can edit the bars (at most 4 minutes).
+- **Recorded in real time.** jam restarts the pattern at cycle 0 and records Strudel's own output for that length plus
+  a 2 s tail, then uploads a 16-bit WAV (mono, then a lower rate, when stereo would pass 25 MB) to
+  `shares/{id}.wav` in the samples bucket. Strudel 1.3's `renderPatternAudio` is not used: it closes the live
+  AudioContext and starts a download, and superdough shares one node pool across contexts.
+- **The page.** `/s/{id}` needs no sign-in: title, "by Tejas, as of ...", play, a waveform, Download, and the code only
+  when "Show the code" was on. The server puts Open Graph tags (with `og:audio`) in the page for link previews.
+- **Your links.** Each session in Sessions lists its links with length and plays: Copy link, Turn off, Turn on. A
+  turned-off link keeps its file, but the page and its audio stop working. At most 50 links are on per user.
+
 ## Connect claude.ai or ChatGPT
 
 Both use OAuth: you paste one URL, and jam asks you to sign in and allow the connection.

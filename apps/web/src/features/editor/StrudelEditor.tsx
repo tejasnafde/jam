@@ -4,7 +4,7 @@ import { draggedSound, hasFiles, hasSound, soundFromDrop } from "@/features/soun
 import { insertionFor, insertionForAll } from "@/features/sounds/snippet";
 import { installAudioTap } from "@/lib/audio";
 import { serial } from "./live";
-import type { EditorViewLike, StrudelEditorElement, StrudelMirror, StrudelState } from "./strudelTypes";
+import type { EditorViewLike, Scheduler, StrudelEditorElement, StrudelMirror, StrudelState } from "./strudelTypes";
 
 export interface StrudelEditorHandle {
   play(): Promise<void>;
@@ -14,6 +14,8 @@ export interface StrudelEditorHandle {
   getCps(): number | null;
   /** The text in the editor now (not the last evaluated code). */
   getCode(): string | null;
+  /** Strudel's scheduler, or null before Strudel loads. A share recording restarts it from cycle 0. */
+  getScheduler(): Scheduler | null;
   /** Evaluates code as Ctrl+Enter does, but never starts playback and does not flash. For Live mode. */
   evaluateQuiet(code: string): Promise<void>;
   /** Moves the cursor to a line (1-based) and highlights it for a moment. */
@@ -85,6 +87,7 @@ export function StrudelEditor({ initialCode, onEvaluated, onStateChange, onLoadE
     setCode: (code) => mirrorRef.current?.setCode(code),
     getCps: () => mirrorRef.current?.repl?.scheduler?.cps ?? null,
     getCode: () => mirrorRef.current?.code ?? null,
+    getScheduler: () => mirrorRef.current?.repl?.scheduler ?? null,
     evaluateQuiet: (code) => queue(async () => void (await mirrorRef.current?.repl?.evaluate?.(code, false))),
     goToLine: (line) => {
       const v = view();
