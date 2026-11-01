@@ -10,7 +10,14 @@ import type { StrudelEditorElement, StrudelMirror, StrudelState } from "@/featur
 import { untilCycle } from "../capture";
 import { computePeaks } from "../peaks";
 import { shareWav } from "../wavFile";
-import { FRAME_READY, isRenderRequest, type RenderReply, type RenderRequest } from "./protocol";
+import {
+  BUILD_ID,
+  FRAME_READY,
+  isRenderRequest,
+  type FrameReady,
+  type RenderReply,
+  type RenderRequest,
+} from "./protocol";
 
 /** Below this the render counts as silent. */
 export const SOUND_THRESHOLD = 0.001;
@@ -155,7 +162,9 @@ export async function render(req: RenderRequest, post: (r: RenderReply, transfer
     if (v > peak) peak = v;
     if (first < 0 && v > SOUND_THRESHOLD) first = i;
   }
-  const channels: [Float32Array, Float32Array] = [new Float32Array(left), new Float32Array(right)];
+  // The rendered buffer's own arrays, not copies: shareWav may mix into the left one in place, and
+  // the buffer is not used again. A mono buffer gives the same array twice, which mixes to itself.
+  const channels: [Float32Array, Float32Array] = [left, right];
   // Peaks first: shareWav may mix the channels down in place.
   const peaks = computePeaks(channels, SHARE_LIMITS.peaks).map((v) => Math.round(v * 1000) / 1000);
   const wav = await shareWav(channels, sampleRate).arrayBuffer();
@@ -171,6 +180,8 @@ export async function render(req: RenderRequest, post: (r: RenderReply, transfer
         peak,
         firstSoundSec: first < 0 ? -1 : first / sampleRate,
         renderMs: Math.round(performance.now() - t0),
+        failed,
+        firstError,
       },
     },
     [wav],
@@ -189,5 +200,5 @@ export function listen() {
       post({ type: "error", message, codeError: err instanceof CodeError });
     });
   });
-  window.parent.postMessage(FRAME_READY, location.origin);
+  window.parent.postMessage({ type: FRAME_READY, build: BUILD_ID } satisfies FrameReady, location.origin);
 }

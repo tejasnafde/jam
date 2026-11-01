@@ -67,6 +67,8 @@ export interface ShareDialogViewProps {
   onCancelRecording: () => void;
   /** "offline": the link is made in the background. "realtime": one pass is recorded from bar 1. */
   mode?: "offline" | "realtime";
+  /** A note that is not an error, e.g. that the code changed since a background share failed. */
+  notice?: string | null;
 }
 
 function Row({ label, children, className }: { label: string; children: ReactNode; className?: string }) {
@@ -222,7 +224,7 @@ export function ShareDialogView(p: ShareDialogViewProps) {
               ) : (
                 <span className="text-muted-foreground">
                   {p.mode === "offline"
-                    ? "Made in the background. Your music keeps playing, and the top bar says when the link is ready."
+                    ? "Made in the background. Your music keeps playing, and the top bar says when the link is ready. Keep this tab open until then."
                     : "Ready after one recorded pass. It plays from bar 1 while it records, so keep this tab open."}
                 </span>
               )}
@@ -230,6 +232,7 @@ export function ShareDialogView(p: ShareDialogViewProps) {
           </dl>
         )}
 
+        {p.notice && <p className="text-sm text-muted-foreground">{p.notice}</p>}
         {p.error && (
           <p role="alert" className="text-sm text-destructive">
             {p.error}
@@ -346,6 +349,7 @@ export function ShareDialog({
   const offline = !!startOffline && !realtime;
   const [phase, setPhase] = useState<SharePhase>({ kind: "loading" });
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [version, setVersion] = useState<VersionEntry | null>(null);
   const [title, setTitle] = useState(realtime?.title ?? sessionName);
   const [ownerName, setOwnerName] = useState(() => realtime?.ownerName ?? firstName(displayName));
@@ -368,6 +372,10 @@ export function ShareDialog({
     setLabel(guess.label);
     if (realtime) {
       setBars(Math.min(realtime.bars, maxBarsAt(tempo)));
+      // A share is always of the latest version (the server refuses an older one), so say so.
+      if (latest.id !== realtime.versionId) {
+        setNotice("Your code changed since the background share started. This records the latest version.");
+      }
     } else {
       setBars(Math.min(guess.bars, maxBarsAt(tempo)));
       setBarsGuessed(guess.source === "default" || guess.capped || guess.bars > maxBarsAt(tempo));
@@ -500,6 +508,7 @@ export function ShareDialog({
       onCreate={() => void create()}
       onCancelRecording={() => abort.current?.abort()}
       mode={offline ? "offline" : realtime ? "realtime" : undefined}
+      notice={notice}
     />
   );
 }

@@ -34,4 +34,11 @@ describe("decideFallback", () => {
   it("reports a cancel as a cancel", () => {
     expect(decideFallback({ ok: false, error: new RenderCancelled() }, true)).toEqual({ kind: "cancelled" });
   });
+
+  it("offers real time when some notes failed, even with sound", () => {
+    expect(decideFallback({ ok: true, peak: 0.9, failed: 1, firstError: "worklet" }, false)).toEqual({
+      kind: "offerRealtime",
+      message: "1 note could not play in the render: worklet",
+    });
+  });
 });

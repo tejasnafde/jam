@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   awaitReply,
+  BUILD_ID,
+  FRAME_DID_NOT_LOAD,
+  FRAME_OTHER_BUILD,
+  FRAME_READY,
+  waitForReady,
   isRenderReply,
   isRenderRequest,
   RenderCancelled,
@@ -18,7 +23,16 @@ const REQUEST = {
   tailSeconds: 2,
   sampleMap: { kick: "https://x/k.wav" },
 };
-const STATS = { cps: 0.5, seconds: 10, sampleRate: 48_000, peak: 0.7, firstSoundSec: 0, renderMs: 900 };
+const STATS = {
+  cps: 0.5,
+  seconds: 10,
+  sampleRate: 48_000,
+  peak: 0.7,
+  firstSoundSec: 0,
+  renderMs: 900,
+  failed: 0,
+  firstError: "",
+};
 
 /** A port the test drives by hand. */
 function fakePort() {
@@ -114,5 +128,59 @@ describe("awaitReply", () => {
     expect(done.wav.byteLength).toBe(16);
     expect(wav.byteLength).toBe(0);
     channel.port2.close();
+  });
+});
+
+describe("awaitReply limits", () => {
+  it("starts the quiet limit again on each progress, up to the hard cap", async () => {
+    vi.useFakeTimers();
+    const port = fakePort();
+    const reply = awaitReply(port, { timeoutMs: 1000, capMs: 2500 });
+    const caught = reply.catch((e: unknown) => e);
+    vi.advanceTimersByTime(900);
+    port.send({ type: "progress", fraction: 0.3 });
+    vi.advanceTimersByTime(900);
+    port.send({ type: "progress", fraction: 0.6 });
+    expect(port.closed).toBe(false);
+    vi.advanceTimersByTime(800);
+    const err = await caught;
+    expect(err).toBeInstanceOf(RenderTimeout);
+    expect((err as Error).message).toBe("The render took more than 3 s.");
+  });
+});
+
+describe("waitForReady", () => {
+  const source = {};
+  const fromFrame = (e: MessageEvent) => e.source === source;
+  const send = (target: EventTarget, data: unknown) =>
+    target.dispatchEvent(new MessageEvent("message", { data, origin: location.origin, source: source as Window }));
+
+  it("resolves on a ready of this build", async () => {
+    const target = new EventTarget();
+    const ready = waitForReady(target, { fromFrame, timeoutMs: 1000 });
+    send(target, { type: FRAME_READY, build: BUILD_ID });
+    await expect(ready).resolves.toBeUndefined();
+  });
+
+  it("fails at once, with the real cause, for a frame of another build (a stale render.html)", async () => {
+    const target = new EventTarget();
+    const ready = waitForReady(target, { fromFrame, timeoutMs: 60_000 });
+    send(target, { type: FRAME_READY, build: "an-older-deploy" });
+    const err = await ready.catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(RenderFailed);
+    expect((err as Error).message).toBe(FRAME_OTHER_BUILD);
+  });
+
+  it("fails after its own short limit when the frame's script never runs", async () => {
+    vi.useFakeTimers();
+    const target = new EventTarget();
+    const ready = waitForReady(target, { fromFrame, timeoutMs: 15_000 });
+    const caught = ready.catch((e: unknown) => e);
+    // A ready from another window, or from another origin, does not count.
+    target.dispatchEvent(
+      new MessageEvent("message", { data: { type: FRAME_READY, build: BUILD_ID }, origin: location.origin }),
+    );
+    vi.advanceTimersByTime(15_001);
+    expect(((await caught) as Error).message).toBe(FRAME_DID_NOT_LOAD);
   });
 });

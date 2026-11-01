@@ -50,7 +50,23 @@ export function useShareJob({ api, sampleMap, onCreated, onRealtime, render = re
   useEffect(() => {
     latest.current = { api, sampleMap, onCreated, onRealtime, render };
   });
+  // The open failure toast. A new share closes it, so its Retry cannot cancel the new one.
+  const failureToast = useRef<string | number | null>(null);
   useEffect(() => () => abort.current?.abort(), []);
+
+  // A closed or reloaded tab would lose the share without a word, so the browser asks first.
+  const preparing = job.kind === "preparing";
+  useEffect(() => {
+    if (!preparing) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [preparing]);
+
+  const closeFailureToast = useCallback(() => {
+    if (failureToast.current !== null) toast.dismiss(failureToast.current);
+    failureToast.current = null;
+  }, []);
 
   const realtime = useCallback(() => {
     if (!draft.current) return;
@@ -62,6 +78,7 @@ export function useShareJob({ api, sampleMap, onCreated, onRealtime, render = re
     (next: ShareDraft) => {
       const { api: currentApi, sampleMap: map, render: renderer } = latest.current;
       if (!currentApi) return;
+      closeFailureToast();
       abort.current?.abort();
       const controller = new AbortController();
       abort.current = controller;
@@ -91,18 +108,20 @@ export function useShareJob({ api, sampleMap, onCreated, onRealtime, render = re
           if (abort.current !== controller || err instanceof ShareCancelled) return;
           const problem = err instanceof ShareProblem ? err : new ShareProblem(String(err), false);
           setJob({ kind: "failed", title, message: problem.message, offerRealtime: problem.offerRealtime });
-          toast.custom(
+          // Its buttons act only while this job is still the latest one.
+          const current = () => abort.current === controller;
+          failureToast.current = toast.custom(
             (id) => (
               <ShareErrorToast
                 message={problem.message}
                 offerRealtime={problem.offerRealtime}
                 onRetry={() => {
                   toast.dismiss(id);
-                  startRef.current(next);
+                  if (current()) startRef.current(next);
                 }}
                 onRealtime={() => {
                   toast.dismiss(id);
-                  realtime();
+                  if (current()) realtime();
                 }}
                 onClose={() => toast.dismiss(id)}
               />
@@ -111,7 +130,7 @@ export function useShareJob({ api, sampleMap, onCreated, onRealtime, render = re
           );
         });
     },
-    [realtime],
+    [realtime, closeFailureToast],
   );
 
   useEffect(() => {
@@ -123,10 +142,11 @@ export function useShareJob({ api, sampleMap, onCreated, onRealtime, render = re
   }, [start]);
 
   const dismiss = useCallback(() => {
+    closeFailureToast();
     abort.current?.abort();
     abort.current = null;
     setJob({ kind: "idle" });
-  }, []);
+  }, [closeFailureToast]);
 
   return { job, start, retry, realtime, dismiss };
 }
