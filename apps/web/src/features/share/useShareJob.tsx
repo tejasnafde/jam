@@ -6,6 +6,7 @@ import { measure } from "@/lib/audio";
 import { sharesApi } from "@/lib/share-api";
 import { ShareCancelled, ShareProblem, runOfflineShare, type OfflineShareDeps, type ShareDraft } from "./offlineShare";
 import { renderInFrame } from "./render/protocol";
+import { ShareErrorToast } from "./ShareStatus";
 
 export type ShareJob =
   | { kind: "idle" }
@@ -90,14 +91,24 @@ export function useShareJob({ api, sampleMap, onCreated, onRealtime, render = re
           if (abort.current !== controller || err instanceof ShareCancelled) return;
           const problem = err instanceof ShareProblem ? err : new ShareProblem(String(err), false);
           setJob({ kind: "failed", title, message: problem.message, offerRealtime: problem.offerRealtime });
-          toast.error("Could not make the link", {
-            description: problem.message,
-            duration: 20_000,
-            action: { label: "Retry", onClick: () => startRef.current(next) },
-            ...(problem.offerRealtime && {
-              cancel: { label: "Record in real time instead", onClick: realtime },
-            }),
-          });
+          toast.custom(
+            (id) => (
+              <ShareErrorToast
+                message={problem.message}
+                offerRealtime={problem.offerRealtime}
+                onRetry={() => {
+                  toast.dismiss(id);
+                  startRef.current(next);
+                }}
+                onRealtime={() => {
+                  toast.dismiss(id);
+                  realtime();
+                }}
+                onClose={() => toast.dismiss(id)}
+              />
+            ),
+            { duration: 20_000 },
+          );
         });
     },
     [realtime],

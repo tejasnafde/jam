@@ -5,6 +5,8 @@
 // Rebuilding it from the globals is not safe either: superdough keeps one pool of reusable
 // nodes (filters, compressors) for all contexts, so nodes from an offline render would end up
 // in the live graph and the other way round. Recording the tap gets exactly what the user hears.
+// Share now renders offline first, in a hidden frame with its own superdough (render/frame.ts);
+// this real-time path is the fallback when that render fails or comes out silent.
 
 import { connectUntapped, musicTap } from "@/lib/audio";
 import type { Scheduler } from "@/features/editor/strudelTypes";

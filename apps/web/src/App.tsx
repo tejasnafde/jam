@@ -158,6 +158,15 @@ export function App({ panelOverride }: { panelOverride?: PanelOverride }) {
   });
   const preparing = shareJob.job.kind === "preparing";
   const canShare = !!panel.profile && !!openSession && (evaluated || playing) && !preparing;
+  const shareStatus = (
+    <ShareStatus
+      job={shareJob.job}
+      onCopy={(url) => void copyLink(url)}
+      onRetry={shareJob.retry}
+      onRealtime={shareJob.realtime}
+      onDismiss={shareJob.dismiss}
+    />
+  );
   const shareButton = panel.profile ? (
     <Button
       variant="ghost"
@@ -190,21 +199,20 @@ export function App({ panelOverride }: { panelOverride?: PanelOverride }) {
         status={<SaveStatus status={status.value} stamp={status.stamp} />}
         tools={
           <>
-            <ShareStatus
-              job={shareJob.job}
-              onCopy={(url) => void copyLink(url)}
-              onRetry={shareJob.retry}
-              onRealtime={shareJob.realtime}
-              onDismiss={shareJob.dismiss}
-            />
+            {/* A phone shows the chip in the strip below the bar, where it has room. */}
+            <div className="max-md:hidden">{shareStatus}</div>
             {shareButton}
             <Booth getCps={() => editor.current?.getCps() ?? null} library={library} />
           </>
         }
         account={account}
+        hideShortcuts={shareJob.job.kind !== "idle"}
       />
-      {sessionName && (
-        <div className="flex h-10 flex-none items-center border-b border-hairline px-2 md:hidden">{sessionName}</div>
+      {(sessionName || shareJob.job.kind !== "idle") && (
+        <div className="flex h-10 flex-none items-center gap-2 border-b border-hairline px-2 md:hidden">
+          <div className="flex min-w-0 flex-1 items-center">{sessionName}</div>
+          {shareStatus}
+        </div>
       )}
       <main
         className={cn(

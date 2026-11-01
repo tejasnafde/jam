@@ -135,7 +135,14 @@ describe("ShareDialog", () => {
     renderDialog(playCode, { startOffline, onOpenChange });
     fireEvent.click(await screen.findByRole("button", { name: "Create link" }));
     expect(startOffline).toHaveBeenCalledWith(
-      expect.objectContaining({ sessionId: "b", versionId: "vB", code: SESSION_B, bars: 3, cps: 0.5, title: "Session B" }),
+      expect.objectContaining({
+        sessionId: "b",
+        versionId: "vB",
+        code: SESSION_B,
+        bars: 3,
+        cps: 0.5,
+        title: "Session B",
+      }),
     );
     expect(onOpenChange).toHaveBeenCalledWith(false);
     expect(playCode).not.toHaveBeenCalled();
@@ -146,7 +153,16 @@ describe("ShareDialog", () => {
   it("records in real time with the choices of a background share that failed", async () => {
     fakeServer();
     const startOffline = vi.fn();
-    const draft = { sessionId: "b", versionId: "vB", code: SESSION_B, title: "My intro", ownerName: "T", bars: 2, cps: 0.5, showCode: true };
+    const draft = {
+      sessionId: "b",
+      versionId: "vB",
+      code: SESSION_B,
+      title: "My intro",
+      ownerName: "T",
+      bars: 2,
+      cps: 0.5,
+      showCode: true,
+    };
     const { onCreated } = renderDialog(async () => true, { startOffline, realtime: draft });
     fireEvent.click(await screen.findByRole("button", { name: "Record in real time" }));
     await waitFor(() => expect(onCreated).toHaveBeenCalled());
