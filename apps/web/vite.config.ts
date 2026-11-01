@@ -15,7 +15,11 @@ export default defineConfig({
       "@jam/shared": src("../../packages/shared/src/index.ts"),
     },
   },
-  build: { chunkSizeWarningLimit: 6000 },
+  build: {
+    chunkSizeWarningLimit: 6000,
+    // render.html is the hidden frame that renders a share offline, with its own Strudel.
+    rolldownOptions: { input: { main: src("./index.html"), render: src("./render.html") } },
+  },
   server: {
     port: 5173,
     proxy: {
