@@ -10,6 +10,15 @@ import { planRouter } from "./routes/plan.js";
 import { prepRouter } from "./routes/prep.js";
 import { samplesRouter } from "./routes/samples.js";
 import { sessionsRouter } from "./routes/sessions.js";
+import {
+  DEFAULT_SHARE_RATE_LIMITS,
+  publicSharesRouter,
+  removeSessionShares,
+  sharePageRouter,
+  sharesRouter,
+  type ShareDeps,
+  type ShareRateLimits,
+} from "./routes/shares.js";
 import { staticRouter } from "./routes/static.js";
 import { tokensRouter } from "./routes/tokens.js";
 import { versionsRouter } from "./routes/versions.js";
@@ -18,12 +27,16 @@ import type { SoundIndex } from "./sounds/soundIndex.js";
 import type { SampleBlobs } from "./store/blobs.js";
 import type { SampleStore } from "./store/samples.js";
 import type { PrepStore } from "./store/prep.js";
+import type { ShareStore } from "./store/shares.js";
 import type { Store } from "./store/types.js";
 
 export interface AppDeps {
   store: Store;
   samples: SampleStore;
   blobs: SampleBlobs;
+  shares: ShareStore;
+  /** Rate limits for share links. False turns them off (tests). */
+  shareLimits?: ShareRateLimits | false;
   sounds: SoundIndex;
   verifyIdToken: IdTokenVerifier;
   prep: { store: PrepStore; run: PrepRunner };
@@ -43,6 +56,8 @@ export function createApp({
   store,
   samples,
   blobs,
+  shares,
+  shareLimits = DEFAULT_SHARE_RATE_LIMITS,
   sounds,
   verifyIdToken,
   prep,
@@ -77,15 +92,36 @@ export function createApp({
     }
   });
 
+  const shareDeps: ShareDeps = {
+    store,
+    shares,
+    blobs,
+    log,
+    now,
+    publicUrl: oauth.settings.publicUrl,
+    edgeSecret: oauth.settings.edgeSecret,
+    limits: shareLimits,
+    staticDir,
+  };
+  // Public, no sign-in: the listener page of a share link, its audio and its metadata.
+  app.use(sharePageRouter(shareDeps));
+  app.use("/api/public/shares", express.json({ limit: "1kb" }), publicSharesRouter(shareDeps));
+
   const api = express.Router();
   api.use(express.json({ limit: "200kb" }));
   api.use(requireUser(verifyIdToken));
   api.use("/versions", versionsRouter(store, log, now));
   api.use("/audio", audioRouter(store));
   api.use("/plan", planRouter(store));
-  api.use("/sessions", sessionsRouter(store, now));
+  api.use(
+    "/sessions",
+    sessionsRouter(store, now, async (uid, sessionId) => {
+      await removeSessionShares(shares, blobs, uid, sessionId);
+    }),
+  );
   api.use("/tokens", tokensRouter(store, log));
   api.use("/samples", samplesRouter(samples, blobs, log));
+  api.use("/shares", sharesRouter(shareDeps));
   api.use("/prep", prepRouter(samples, prep.store, prep.run, log));
   app.use("/api", api);
 

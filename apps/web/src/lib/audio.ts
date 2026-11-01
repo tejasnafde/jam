@@ -13,6 +13,16 @@
 
 const analysers = new WeakMap<BaseAudioContext, AnalyserNode>();
 let latest: AnalyserNode | null = null;
+/** AudioNode.connect before the tap, so a recorder can reach the speakers without feeding the tap. */
+let untapped: ((this: AudioNode, ...args: unknown[]) => unknown) | null = null;
+
+function makeAnalyser(ctx: BaseAudioContext): AnalyserNode {
+  const analyser = ctx.createAnalyser();
+  analyser.fftSize = 2048;
+  analyser.smoothingTimeConstant = 0.6;
+  analysers.set(ctx, analyser);
+  return analyser;
+}
 
 /** Strudel's context, from the globals the REPL's prebake sets. Null before Strudel loads. */
 function musicContext(): BaseAudioContext | null {
@@ -30,6 +40,7 @@ export function installAudioTap() {
   if (proto.__jamTapped) return;
   proto.__jamTapped = true;
   const original = proto.connect as (this: AudioNode, ...args: unknown[]) => unknown;
+  untapped = original;
   proto.connect = function (this: AudioNode, ...args: unknown[]) {
     const result = original.apply(this, args);
     const dest = args[0];
@@ -37,18 +48,28 @@ export function installAudioTap() {
     if (!(dest instanceof AudioDestinationNode)) return result;
     // An offline render is never heard.
     if (typeof OfflineAudioContext !== "undefined" && ctx instanceof OfflineAudioContext) return result;
-    let analyser = analysers.get(ctx);
+    const analyser = analysers.get(ctx) ?? makeAnalyser(ctx);
     if (this === analyser) return result;
-    if (!analyser) {
-      analyser = ctx.createAnalyser();
-      analyser.fftSize = 2048;
-      analyser.smoothingTimeConstant = 0.6;
-      analysers.set(ctx, analyser);
-    }
     latest = analyser;
     original.call(this, analyser);
     return result;
   } as typeof proto.connect;
+}
+
+/**
+ * Strudel's AudioContext and its tap: every sound Strudel sends to the speakers also reaches
+ * the tap, so a recorder connected to it hears exactly the music. Null before Strudel loads.
+ */
+export function musicTap(): { ctx: AudioContext; tap: AnalyserNode } | null {
+  const ctx = musicContext();
+  if (!(ctx instanceof AudioContext)) return null;
+  return { ctx, tap: analysers.get(ctx) ?? makeAnalyser(ctx) };
+}
+
+/** Connects without the tap, so a recorder's own route to the speakers does not loop back into it. */
+export function connectUntapped(from: AudioNode, to: AudioNode) {
+  if (untapped) untapped.call(from, to);
+  else from.connect(to);
 }
 
 /** Loudness (RMS) and the share of spectral energy in each band. */

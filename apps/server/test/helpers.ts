@@ -7,6 +7,7 @@ import type { PrepRun } from "../src/prep/runner.js";
 import { MemoryStore } from "../src/store/memory.js";
 import { MemoryPrepStore } from "../src/store/prep.js";
 import { MemorySampleStore } from "../src/store/samples.js";
+import { MemoryShareStore } from "../src/store/shares.js";
 
 /** Fake Firebase: "id-<uid>" is a valid ID token for <uid>. */
 export const verifyIdToken = async (token: string) => {
@@ -33,11 +34,12 @@ export function testClock(start = Date.parse("2026-10-30T12:00:00Z")) {
   return { now: () => t, advance: (ms: number) => (t += ms) };
 }
 
-export function setup(overrides: Partial<Pick<AppDeps, "oauth" | "fetchDocument" | "staticDir">> = {}) {
+export function setup(overrides: Partial<Pick<AppDeps, "oauth" | "fetchDocument" | "staticDir" | "shareLimits">> = {}) {
   const store = new MemoryStore();
   const samples = new MemorySampleStore();
   const blobs = new MemoryBlobs();
   const prep = new MemoryPrepStore();
+  const shares = new MemoryShareStore();
   /** Every prep run the app started. Set runner.fail to make the runner throw. */
   const runs: PrepRun[] = [];
   const runner = { fail: false };
@@ -50,6 +52,8 @@ export function setup(overrides: Partial<Pick<AppDeps, "oauth" | "fetchDocument"
     store,
     samples,
     blobs,
+    shares,
+    shareLimits: overrides.shareLimits,
     sounds: new SoundIndex(fakeFetcher),
     verifyIdToken,
     prep: { store: prep, run },
@@ -59,7 +63,7 @@ export function setup(overrides: Partial<Pick<AppDeps, "oauth" | "fetchDocument"
     now: clock.now,
     coachPollMs: 20,
   });
-  return { store, samples, blobs, prep, runs, runner, app, clock, ...clients(app) };
+  return { store, samples, blobs, shares, prep, runs, runner, app, clock, ...clients(app) };
 }
 
 const ACCEPT = "application/json, text/event-stream";

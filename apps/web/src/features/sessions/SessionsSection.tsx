@@ -1,5 +1,6 @@
-import type { SessionSummary, VersionEntry } from "@jam/shared";
-import { ChevronRight, Copy, Ellipsis, Eye, Loader2, Pencil, Plus, Trash2, Undo2 } from "lucide-react";
+import { formatDuration, type SessionSummary, type Share, type VersionEntry } from "@jam/shared";
+import { Check, ChevronRight, Copy, Ellipsis, Eye, Link2, Loader2, Pencil, Plus, Trash2, Undo2 } from "lucide-react";
+import { toast } from "sonner";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,6 +20,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { PLAY_KEY } from "@/features/editor/defaultCode";
+import type { SharesHandle } from "@/features/share/useShares";
+import { shareLink } from "@/lib/share-api";
 import { cn } from "@/lib/utils";
 import { relativeTime, versionTime } from "./draft";
 import type { SessionsHandle } from "./useSessions";
@@ -26,6 +29,7 @@ import type { SessionsHandle } from "./useSessions";
 interface Props {
   signedIn: boolean;
   sessions: SessionsHandle;
+  shares?: SharesHandle;
 }
 
 const versionsText = (n: number) => (n === 1 ? "1 version" : `${n.toLocaleString()} versions`);
@@ -234,12 +238,163 @@ function VersionList({ session, sessions }: { session: SessionSummary; sessions:
   );
 }
 
+const playsText = (n: number) => (n === 1 ? "1 play" : `${n.toLocaleString()} plays`);
+
+const linksText = (n: number) => (n === 1 ? "1 link" : `${n.toLocaleString()} links`);
+
+/** One share link of a session: copy it, turn it off (the file stays) and on again, or delete a turned-off one. */
+function ShareItem({ share, shares }: { share: Share; shares: SharesHandle }) {
+  const [copied, setCopied] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(shareLink(share.id));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
+    } catch {
+      toast.error("Could not copy the link.");
+    }
+  };
+  const toggle = async () => {
+    setBusy(true);
+    try {
+      await shares.setEnabled(share.id, !share.enabled);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const remove = async () => {
+    if (!window.confirm(`Delete the link to ${share.title} and its audio? This cannot be undone.`)) return;
+    setBusy(true);
+    try {
+      await shares.remove(share.id);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const sep = (
+    <span className="text-gutter" aria-hidden="true">
+      /
+    </span>
+  );
+  return (
+    <li className="flex flex-col py-1">
+      <div className="flex items-center gap-1.5">
+        <Link2
+          className={cn("size-3.5 flex-none", share.enabled ? "text-water" : "text-muted-foreground")}
+          aria-hidden="true"
+        />
+        <p
+          className={cn("min-w-0 flex-1 truncate text-xs font-medium", !share.enabled && "opacity-60")}
+          title={share.title}
+        >
+          {share.title}
+        </p>
+        {share.enabled && (
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            className="text-muted-foreground"
+            onClick={() => void copy()}
+            aria-label={`Copy link to ${share.title}`}
+            title={copied ? "Copied" : "Copy link"}
+          >
+            {copied ? <Check className="text-water" /> : <Copy />}
+          </Button>
+        )}
+        <Button
+          variant="ghost"
+          size="xs"
+          disabled={busy}
+          className="text-muted-foreground"
+          onClick={() => void toggle()}
+          aria-label={`${share.enabled ? "Turn off" : "Turn on"} the link to ${share.title}`}
+          title={
+            share.enabled
+              ? "The page stops now, and audio already open stops within 15 minutes. The file is kept."
+              : undefined
+          }
+        >
+          {share.enabled ? "Turn off" : "Turn on"}
+        </Button>
+        {!share.enabled && (
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            disabled={busy}
+            className="text-muted-foreground hover:text-destructive"
+            onClick={() => void remove()}
+            aria-label={`Delete the link to ${share.title}`}
+            title="Delete the link and its audio"
+          >
+            <Trash2 />
+          </Button>
+        )}
+      </div>
+      <p
+        className={cn(
+          "flex gap-1.5 truncate pl-5 text-[11px] text-muted-foreground tabular-nums",
+          !share.enabled && "opacity-60",
+        )}
+      >
+        <span>{formatDuration(share.seconds)}</span>
+        {sep}
+        <span>{playsText(share.plays)}</span>
+        {sep}
+        <span>{relativeTime(share.createdAt)}</span>
+        {!share.enabled && (
+          <>
+            {sep}
+            <span>off</span>
+          </>
+        )}
+      </p>
+    </li>
+  );
+}
+
+function ShareList({ label, list, shares }: { label: string; list: Share[]; shares: SharesHandle }) {
+  return (
+    <ul aria-label={label} className="mb-2 ml-[30px] flex flex-col gap-0.5">
+      {list.map((share) => (
+        <ShareItem key={share.id} share={share} shares={shares} />
+      ))}
+    </ul>
+  );
+}
+
+/** A session's links, as one "3 links" line that opens the list, so many links do not crowd the sessions. */
+function SessionLinks({ session, list, shares }: { session: SessionSummary; list: Share[]; shares: SharesHandle }) {
+  const [open, setOpen] = useState(false);
+  const on = list.filter((s) => s.enabled).length;
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        aria-label={`${open ? "Hide" : "Show"} links to ${session.name}`}
+        className="mb-1.5 ml-[30px] flex items-center gap-1.5 rounded-sm text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+      >
+        <ChevronRight className={cn("size-3 transition-transform", open && "rotate-90")} aria-hidden="true" />
+        <Link2 className={cn("size-3.5", on ? "text-water" : "")} aria-hidden="true" />
+        <span className="tabular-nums">
+          {linksText(list.length)}
+          {on < list.length && `, ${on.toLocaleString()} on`}
+        </span>
+      </button>
+      {open && <ShareList label={`Links to ${session.name}`} list={list} shares={shares} />}
+    </>
+  );
+}
+
 function SessionRow({
   session,
   current,
   expanded,
   renaming,
   sessions,
+  shares,
   onToggle,
   onRenaming,
 }: {
@@ -248,13 +403,20 @@ function SessionRow({
   expanded: boolean;
   renaming: boolean;
   sessions: SessionsHandle;
+  shares?: SharesHandle;
   onToggle: () => void;
   onRenaming: (on: boolean) => void;
 }) {
-  const remove = () => {
+  const links = shares?.shares.filter((x) => x.sessionId === session.id) ?? [];
+  const remove = async () => {
     const what = session.versionCount ? ` and its ${versionsText(session.versionCount)}` : "";
-    if (!window.confirm(`Delete ${session.name}${what}? This cannot be undone.`)) return;
-    void sessions.remove(session.id);
+    const linked = links.length
+      ? ` Its ${linksText(links.length)} and ${links.length === 1 ? "its" : "their"} audio are deleted too.`
+      : "";
+    if (!window.confirm(`Delete ${session.name}${what}?${linked} This cannot be undone.`)) return;
+    await sessions.remove(session.id);
+    // The server deleted the session's links with it.
+    if (links.length) await shares?.refresh();
   };
   return (
     <li className="border-b border-hairline last:border-0" aria-current={current ? "true" : undefined}>
@@ -318,7 +480,7 @@ function SessionRow({
                 Duplicate
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem variant="destructive" onSelect={remove}>
+              <DropdownMenuItem variant="destructive" onSelect={() => void remove()}>
                 <Trash2 />
                 Delete
               </DropdownMenuItem>
@@ -326,6 +488,7 @@ function SessionRow({
           </DropdownMenu>
         </span>
       </div>
+      {shares && links.length > 0 && <SessionLinks session={session} list={links} shares={shares} />}
       {expanded && (
         // A new version remounts the list, so it shows at the top.
         <VersionList key={session.versionCount} session={session} sessions={sessions} />
@@ -335,7 +498,7 @@ function SessionRow({
 }
 
 /** Named pieces: open one to continue it on any computer. The open one gets every new version. */
-export function SessionsSection({ signedIn, sessions }: Props) {
+export function SessionsSection({ signedIn, sessions, shares }: Props) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -347,6 +510,11 @@ export function SessionsSection({ signedIn, sessions }: Props) {
       </p>
     );
   }
+
+  // Links whose session is gone (deleted on another device, or before links went with their
+  // session). They stay listed so they can be turned off or deleted.
+  const known = new Set(sessions.sessions.map((s) => s.id));
+  const orphans = sessions.sessions.length ? (shares?.shares.filter((x) => !known.has(x.sessionId)) ?? []) : [];
 
   const create = async () => {
     setCreating(true);
@@ -374,11 +542,18 @@ export function SessionsSection({ signedIn, sessions }: Props) {
               expanded={expanded === s.id}
               renaming={renaming === s.id}
               sessions={sessions}
+              shares={shares}
               onToggle={() => setExpanded(expanded === s.id ? null : s.id)}
               onRenaming={(on) => setRenaming(on ? s.id : null)}
             />
           ))}
         </ul>
+      )}
+      {shares && orphans.length > 0 && (
+        <section aria-label="Links of deleted sessions" className="flex flex-col gap-1">
+          <h3 className="text-xs font-medium text-muted-foreground">Links of deleted sessions</h3>
+          <ShareList label="Links of deleted sessions" list={orphans} shares={shares} />
+        </section>
       )}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <Button variant="secondary" size="lg" disabled={creating} onClick={() => void create()}>
