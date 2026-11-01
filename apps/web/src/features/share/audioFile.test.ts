@@ -57,9 +57,12 @@ describe("assemble", () => {
       l: Float32Array.from(values),
       r: Float32Array.from(values.map((v) => -v)),
     });
-    const [l, r] = assemble([block(0, [1, 1, 1, 1]), block(6, [2, 2, 2, 2])], 2, 8);
+    const blocks = [block(0, [1, 1, 1, 1]), block(6, [2, 2, 2, 2])];
+    const [l, r] = assemble(blocks, 2, 8);
     expect(Array.from(l)).toEqual([1, 1, 0, 0, 2, 2, 2, 2]);
     expect(Array.from(r)).toEqual([-1, -1, 0, 0, -2, -2, -2, -2]);
+    // The blocks are let go as they are copied.
+    expect(blocks).toHaveLength(0);
   });
 });
 

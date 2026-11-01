@@ -10,6 +10,11 @@ export const ShareId = z.string().regex(SHARE_ID);
 export const SHARE_LIMITS = {
   /** Enabled shares per user. Turned-off shares do not count. */
   activePerUser: 50,
+  /** Shares still recording or uploading per user. Older ones are swept after pendingTtlMs. */
+  pendingPerUser: 3,
+  pendingTtlMs: 60 * 60_000,
+  /** Waveform bars stored with a share, so the page draws it without the file. */
+  peaks: 240,
   barsMin: 1,
   barsMax: 256,
   /** The longest piece a share plays, without the tail. */
@@ -51,6 +56,12 @@ export interface CreateShareResponse {
   url: string;
 }
 
+/** Step 2: the file is uploaded. The waveform comes along, so listeners never decode the file for it. */
+export const readyShareRequestSchema = z.object({
+  peaks: z.array(z.number().min(0).max(1)).length(SHARE_LIMITS.peaks).optional(),
+});
+export type ReadyShareRequest = z.infer<typeof readyShareRequestSchema>;
+
 export const updateShareRequestSchema = z
   .object({
     enabled: z.boolean().optional(),
@@ -81,7 +92,10 @@ export interface ShareListResponse {
   shares: Share[];
 }
 
-/** What anyone with the link gets. Never the uid, the session, or the storage path. */
+/**
+ * What anyone with the link gets. Never the uid, the session, or the storage path. The audio is at
+ * shareAudioPath(id), which redirects to a fresh short-lived signed URL on each request.
+ */
 export const publicShareSchema = z.object({
   id: z.string(),
   title: z.string(),
@@ -91,13 +105,14 @@ export const publicShareSchema = z.object({
   seconds: z.number(),
   /** Only when the owner chose "Show the code". */
   code: z.string().nullable(),
-  /** A short-lived signed read URL of the WAV. */
-  audioUrl: z.string(),
-  /** Same file, sent as an attachment. */
-  downloadUrl: z.string(),
+  /** The waveform, 0..1, or null for a share made without one. */
+  peaks: z.array(z.number()).nullable(),
   createdAt: z.string(),
 });
 export type PublicShare = z.infer<typeof publicShareSchema>;
+
+/** The audio of a share: a redirect to a fresh signed URL. Add `?download` for an attachment. */
+export const shareAudioPath = (id: string) => `/api/public/shares/${id}/audio`;
 
 /** m:ss, for lengths under an hour. */
 export function formatDuration(seconds: number): string {

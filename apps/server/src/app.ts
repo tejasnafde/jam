@@ -13,6 +13,7 @@ import { sessionsRouter } from "./routes/sessions.js";
 import {
   DEFAULT_SHARE_RATE_LIMITS,
   publicSharesRouter,
+  removeSessionShares,
   sharePageRouter,
   sharesRouter,
   type ShareDeps,
@@ -112,7 +113,12 @@ export function createApp({
   api.use("/versions", versionsRouter(store, log, now));
   api.use("/audio", audioRouter(store));
   api.use("/plan", planRouter(store));
-  api.use("/sessions", sessionsRouter(store, now));
+  api.use(
+    "/sessions",
+    sessionsRouter(store, now, async (uid, sessionId) => {
+      await removeSessionShares(shares, blobs, uid, sessionId);
+    }),
+  );
   api.use("/tokens", tokensRouter(store, log));
   api.use("/samples", samplesRouter(samples, blobs, log));
   api.use("/shares", sharesRouter(shareDeps));

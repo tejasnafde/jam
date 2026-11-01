@@ -20,6 +20,7 @@ import { usePlan } from "@/features/plan/usePlan";
 import { usePrep } from "@/features/prep/usePrep";
 import { SessionName } from "@/features/sessions/SessionName";
 import { ShareDialog } from "@/features/share/ShareDialog";
+import { evaluateShown } from "@/features/share/shownCode";
 import { useShares } from "@/features/share/useShares";
 import { useSessions, type EditorBridge } from "@/features/sessions/useSessions";
 import { preventFileNavigation } from "@/features/sounds/dragState";
@@ -53,20 +54,22 @@ export function App({ panelOverride }: { panelOverride?: PanelOverride }) {
     [],
   );
   const sessions = useSessions(auth.api, bridge);
-  const { refresh: refreshSessions } = sessions;
+  const { refresh: refreshSessions, getSessionId } = sessions;
   const plan = usePlan(auth.api, sessions.handle.currentId);
   const coach = useCoach(auth.api, sessions.handle.currentId);
   const { refresh: refreshCoach } = coach;
   // A run can add a coach check-in, so the thread is checked at once too.
-  // Share needs a pattern Strudel has evaluated in this page.
-  const [evaluated, setEvaluated] = useState(false);
+  // Share needs code of the open session that Strudel has evaluated in this page. Opening another
+  // session does not evaluate it, so the mark is per session.
+  const [evaluatedIn, setEvaluatedIn] = useState<string | null>(null);
+  const evaluated = evaluatedIn !== null && evaluatedIn === sessions.handle.currentId;
   const [shareOpen, setShareOpen] = useState(false);
   const shares = useShares(auth.api);
   const onVersionSaved = useCallback(() => {
-    setEvaluated(true);
+    setEvaluatedIn(getSessionId());
     void refreshSessions().catch(console.error);
     void refreshCoach().catch(console.error);
-  }, [refreshSessions, refreshCoach]);
+  }, [refreshSessions, refreshCoach, getSessionId]);
   const [playing, setPlaying] = useState(false);
   const [panelOpen, setPanelOpen] = useLocalStorageFlag("jam:panel", true);
   const [live, setLive] = useLocalStorageFlag("jam:live", false);
@@ -213,6 +216,7 @@ export function App({ panelOverride }: { panelOverride?: PanelOverride }) {
           displayName={panel.profile.name}
           getScheduler={() => editor.current?.getScheduler() ?? null}
           getCps={() => editor.current?.getCps() ?? null}
+          playCode={(code) => evaluateShown(editor.current, code)}
           flushVersions={() => control.current?.flushVersions()}
           onCreated={panel.shares?.added ?? shares.added}
         />

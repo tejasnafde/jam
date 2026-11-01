@@ -1,5 +1,7 @@
 // How long one pass of the playing pattern is, in bars (1 cycle = 1 bar). A heuristic:
-// an arrange(...) is the sum of its cycle counts; otherwise the longest <...> sequence wins.
+// an arrange(...) is the sum of its cycle counts; otherwise the <...> sequences and the layers
+// repeat together after the least common multiple of their lengths, with /n, *n, .slow(n) and
+// .fast(n) applied.
 import { SHARE_LIMITS } from "@jam/shared";
 
 export const DEFAULT_BARS = 8;
@@ -9,6 +11,8 @@ export interface PlayGuess {
   label: string;
   bars: number;
   source: "arrange" | "sequence" | "default";
+  /** True when the code asks for more than SHARE_LIMITS.barsMax bars, so `bars` is cut. */
+  capped: boolean;
 }
 
 export const clampBars = (n: number) =>
@@ -158,24 +162,73 @@ export function sequenceLength(body: string): number {
   return Math.max(0, ...lengths);
 }
 
-/** The length of the longest `<...>` sequence inside the code's mini-notation strings ("..." and `...`). */
-export function longestSequence(code: string): number {
-  let best = 0;
-  for (const m of code.matchAll(/"([^"\\]*(?:\\.[^"\\]*)*)"|`([^`]*)`/g)) {
-    const text = m[1] ?? m[2] ?? "";
-    for (let i = 0; i < text.length; i++) {
-      if (text[i] !== "<") continue;
-      let depth = 0;
-      let j = i;
-      for (; j < text.length; j++) {
-        if (OPEN.includes(text[j] as string)) depth++;
-        if (CLOSE.includes(text[j] as string)) depth--;
-        if (depth === 0) break;
-      }
-      if (depth === 0) best = Math.max(best, sequenceLength(text.slice(i + 1, j)));
+/** A length in cycles as a fraction [numerator, denominator], so `<a b c>*2` (1.5 cycles) stays exact. */
+type Cycles = [number, number];
+
+/** Above this a length is far past barsMax; it stops growing so the numbers stay exact. */
+const HUGE = 1_000_000;
+const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a);
+const reduce = ([n, d]: Cycles): Cycles => {
+  const g = gcd(n, d) || 1;
+  return [Math.min(HUGE, n / g), d / g];
+};
+const times = ([n, d]: Cycles, by: number, per = 1): Cycles => reduce([n * by, d * per]);
+/** The shortest length that is a whole number of both (the layers line up again). */
+const together = (a: Cycles, b: Cycles): Cycles => reduce([(a[0] / gcd(a[0], b[0])) * b[0], gcd(a[1], b[1])]);
+/** The fewest whole bars that hold a whole number of passes. */
+const wholeBars = ([n]: Cycles) => n;
+
+/** A whole-number factor after `/` or `*`, or null (a pattern, or a fraction, is not read). */
+const factor = (text: string, op: string): number | null => {
+  const m = new RegExp(`^\\${op}(\\d+)(?![\\d.])`).exec(text);
+  const n = m ? Number(m[1]) : 0;
+  return n >= 1 ? n : null;
+};
+
+/** The cycles of the `<...>` sequences in one mini-notation text, or null when it has none. */
+function miniCycles(text: string): Cycles | null {
+  let total: Cycles | null = null;
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] !== "<") continue;
+    let depth = 0;
+    let j = i;
+    for (; j < text.length; j++) {
+      if (OPEN.includes(text[j] as string)) depth++;
+      if (CLOSE.includes(text[j] as string)) depth--;
+      if (depth === 0) break;
     }
+    if (depth !== 0) break;
+    const body = text.slice(i + 1, j);
+    const steps = Math.max(1, Math.round(sequenceLength(body)));
+    // A nested <...> moves one step each time its outer step comes round: <a <b c>> is 2 x 2 bars.
+    let cycles = times(miniCycles(body) ?? [1, 1], steps);
+    const after = text.slice(j + 1);
+    const slow = factor(after, "/");
+    const fast = factor(after, "*");
+    if (slow) cycles = times(cycles, slow);
+    if (fast) cycles = times(cycles, 1, fast);
+    total = total ? together(total, cycles) : cycles;
+    i = j;
   }
-  return best;
+  return total;
+}
+
+/**
+ * The bars after which the `<...>` sequences in the code's mini-notation strings ("..." and `...`)
+ * all line up again, times a `.slow(n)` and over a `.fast(n)` on the expression. 0 when there is none.
+ */
+export function sequenceCycles(code: string): number {
+  let total: Cycles | null = null;
+  for (const m of code.matchAll(/"([^"\\]*(?:\\.[^"\\]*)*)"|`([^`]*)`/g)) {
+    const cycles = miniCycles(m[1] ?? m[2] ?? "");
+    if (cycles) total = total ? together(total, cycles) : cycles;
+  }
+  if (!total) return 0;
+  for (const m of code.matchAll(/\.(slow|fast)\(\s*(\d+)\s*\)/g)) {
+    const n = Number(m[2]);
+    if (n >= 1) total = m[1] === "slow" ? times(total, n) : times(total, 1, n);
+  }
+  return wholeBars(total);
 }
 
 const clip = (text: string, max = 32) => (text.length > max ? `${text.slice(0, max - 3)}...` : text);
@@ -194,12 +247,22 @@ export function guessPlay(code: string): PlayGuess {
     const expr = resolve(clean, play);
     const cycles = arrangeCycles(expr);
     if (cycles !== null) arranged = Math.max(arranged, cycles);
-    else sequence = Math.max(sequence, longestSequence(expr));
+    else {
+      // Layers repeat together after the least common multiple of their lengths.
+      const n = sequenceCycles(expr);
+      if (n) sequence = sequence ? Math.min(HUGE, (sequence / gcd(sequence, n)) * n) : n;
+    }
   }
-  if (arranged > 0 && arranged >= sequence) return { label, bars: clampBars(arranged), source: "arrange" };
-  if (!sequence) sequence = longestSequence(clean);
-  if (sequence > 0) return { label, bars: clampBars(sequence), source: "sequence" };
-  return { label, bars: DEFAULT_BARS, source: "default" };
+  const result = (n: number, source: PlayGuess["source"]): PlayGuess => ({
+    label,
+    bars: clampBars(n),
+    source,
+    capped: n > SHARE_LIMITS.barsMax,
+  });
+  if (arranged > 0 && arranged >= sequence) return result(arranged, "arrange");
+  if (!sequence) sequence = sequenceCycles(clean);
+  if (sequence > 0) return result(sequence, "sequence");
+  return { label, bars: DEFAULT_BARS, source: "default", capped: false };
 }
 
 /** Seconds for a number of bars at a tempo in cycles per second. */

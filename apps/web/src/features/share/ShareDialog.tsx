@@ -1,4 +1,11 @@
-import { firstName, formatDuration, SHARE_LIMITS, type Share, type VersionEntry } from "@jam/shared";
+import {
+  firstName,
+  formatDuration,
+  SHARE_LIMITS,
+  type CreateShareResponse,
+  type Share,
+  type VersionEntry,
+} from "@jam/shared";
 import { Check, Copy, Link2, Loader2 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
@@ -20,6 +27,7 @@ import { cn } from "@/lib/utils";
 import { asOfText } from "./asOf";
 import { CaptureCancelled, capturePass } from "./capture";
 import { barsToSeconds, clampBars, guessPlay, maxBarsAt } from "./length";
+import { computePeaks } from "./peaks";
 import { shareWav } from "./wavFile";
 
 export type SharePhase =
@@ -47,6 +55,8 @@ export interface ShareDialogViewProps {
   versionId: string | null;
   label: string;
   bars: number;
+  /** True when the bars are a default or were cut to fit, not read from the code. */
+  barsGuessed: boolean;
   maxBars: number;
   onBars: (bars: number) => void;
   seconds: number;
@@ -163,7 +173,10 @@ export function ShareDialogView(p: ShareDialogViewProps) {
                   <span>bars</span>
                 </span>
               ) : (
-                <span className="tabular-nums">{p.bars === 1 ? "1 bar" : `${p.bars} bars`}</span>
+                <span className="tabular-nums">
+                  {p.bars === 1 ? "1 bar" : `${p.bars} bars`}
+                  {p.barsGuessed && <span className="text-muted-foreground"> (guessed)</span>}
+                </span>
               )}
               <Dot />
               <span className="tabular-nums">{formatDuration(total)}</span>
@@ -204,7 +217,9 @@ export function ShareDialogView(p: ShareDialogViewProps) {
                   </Button>
                 </>
               ) : (
-                <span className="text-muted-foreground">Ready after one recorded pass.</span>
+                <span className="text-muted-foreground">
+                  Ready after one recorded pass. It plays from bar 1 while it records, so keep this tab open.
+                </span>
               )}
             </Row>
           </dl>
@@ -239,7 +254,9 @@ export function ShareDialogView(p: ShareDialogViewProps) {
                   : `Recording ${formatDuration(p.phase.elapsed)} / ${formatDuration(total)}`}
               </span>
             </p>
-            <p className="text-xs text-muted-foreground">The piece plays from bar 1 while it records.</p>
+            <p className="text-xs text-muted-foreground">
+              The piece plays from bar 1 while it records. Keep this tab open.
+            </p>
           </div>
         )}
 
@@ -286,6 +303,8 @@ interface Props {
   displayName: string;
   getScheduler: () => Scheduler | null;
   getCps: () => number | null;
+  /** Makes the given code the pattern Strudel plays. False when it does not evaluate. */
+  playCode: (code: string) => Promise<boolean>;
   /** Saves a Live version that waits, so the latest version is the code that plays. */
   flushVersions: () => void;
   onCreated: (share: Share) => void;
@@ -306,6 +325,7 @@ export function ShareDialog({
   displayName,
   getScheduler,
   getCps,
+  playCode,
   flushVersions,
   onCreated,
 }: Props) {
@@ -315,6 +335,7 @@ export function ShareDialog({
   const [title, setTitle] = useState(sessionName);
   const [ownerName, setOwnerName] = useState(() => firstName(displayName));
   const [bars, setBars] = useState(8);
+  const [barsGuessed, setBarsGuessed] = useState(false);
   const [label, setLabel] = useState("");
   const [showCode, setShowCode] = useState(false);
   const [cps, setCps] = useState(0.5);
@@ -331,6 +352,7 @@ export function ShareDialog({
     setCps(tempo);
     setLabel(guess.label);
     setBars(Math.min(guess.bars, maxBarsAt(tempo)));
+    setBarsGuessed(guess.source === "default" || guess.capped || guess.bars > maxBarsAt(tempo));
     setPhase({ kind: "form" });
   };
 
@@ -351,18 +373,26 @@ export function ShareDialog({
   const seconds = barsToSeconds(bars, cps);
 
   const create = async () => {
-    const scheduler = getScheduler();
-    if (!version || !scheduler?.pattern) {
-      setError("Play the code once, then share it.");
-      return;
-    }
+    if (!version) return;
     const client = sharesApi(api);
     const controller = new AbortController();
     abort.current = controller;
     setError(null);
+    let started: CreateShareResponse | null = null;
     try {
+      // Strudel may still hold another session's pattern (opening a session does not evaluate it).
+      // The recording must be the code this dialog names, so that code is evaluated first.
+      if (!(await playCode(version.code))) {
+        setError("Play this session once, then share it.");
+        return;
+      }
+      const scheduler = getScheduler();
+      if (!scheduler?.pattern) {
+        setError("Play this session once, then share it.");
+        return;
+      }
       // The server checks the version, the limits and the rate first, so no pass is recorded for nothing.
-      const started = await client.create({
+      started = await client.create({
         sessionId,
         versionId: version.id,
         title: title.trim(),
@@ -374,17 +404,20 @@ export function ShareDialog({
       setPhase({ kind: "recording", elapsed: 0, tail: false });
       const recording = await capturePass(
         scheduler,
-        seconds,
-        SHARE_LIMITS.tailSeconds,
+        { cycles: bars, seconds, tailSeconds: SHARE_LIMITS.tailSeconds },
         ({ elapsed, tail }) => setPhase({ kind: "recording", elapsed, tail }),
         controller.signal,
       );
       setPhase({ kind: "uploading" });
+      // Peaks first: shareWav may mix the channels down in place.
+      const peaks = computePeaks(recording.channels, SHARE_LIMITS.peaks).map((v) => Math.round(v * 1000) / 1000);
       await client.put(started.uploadUrl, shareWav(recording.channels, recording.sampleRate), controller.signal);
-      const share = await client.ready(started.id);
+      const share = await client.ready(started.id, { peaks });
       onCreated(share);
       setPhase({ kind: "done", url: started.url });
     } catch (err) {
+      // An unfinished share is deleted with any file it has, so it never lingers.
+      if (started) void client.remove(started.id).catch(console.error);
       if (err instanceof CaptureCancelled || controller.signal.aborted) {
         setPhase({ kind: "form" });
         return;
@@ -421,8 +454,12 @@ export function ShareDialog({
       versionId={version?.id ?? null}
       label={label}
       bars={bars}
+      barsGuessed={barsGuessed}
       maxBars={maxBarsAt(cps)}
-      onBars={setBars}
+      onBars={(n) => {
+        setBars(n);
+        setBarsGuessed(false);
+      }}
       seconds={seconds}
       showCode={showCode}
       onShowCode={setShowCode}
