@@ -5,14 +5,23 @@ type Bucket = ReturnType<ReturnType<typeof getStorage>["bucket"]>;
 
 /** Audio files in the private samples bucket. Clients only ever see signed URLs. */
 export interface SampleBlobs {
-  /** A signed PUT URL. The client must send the same Content-Type and UPLOAD_SIZE_HEADERS. */
-  uploadUrl(path: string, contentType: string): Promise<string>;
-  /** A signed GET URL, valid for one hour. */
-  readUrl(path: string): Promise<string>;
+  /**
+   * A signed PUT URL. The client must send the same Content-Type and the same size headers
+   * (UPLOAD_SIZE_HEADERS unless others are given).
+   */
+  uploadUrl(path: string, contentType: string, sizeHeaders?: Record<string, string>): Promise<string>;
+  /** A signed GET URL, valid for one hour unless ttlMs says otherwise. downloadName makes it an attachment. */
+  readUrl(path: string, opts?: ReadUrlOptions): Promise<string>;
   /** Size in bytes, or null when the object does not exist. */
   size(path: string): Promise<number | null>;
   /** Removes the object. A missing object is not an error. */
   remove(path: string): Promise<void>;
+}
+
+export interface ReadUrlOptions {
+  ttlMs?: number;
+  /** Sent as Content-Disposition: attachment, so a browser saves the file. */
+  downloadName?: string;
 }
 
 const UPLOAD_TTL_MS = 15 * 60_000;
@@ -22,21 +31,24 @@ const READ_TTL_MS = 60 * 60_000;
 export class GcsBlobs implements SampleBlobs {
   constructor(private readonly bucket: Pick<Bucket, "file">) {}
 
-  async uploadUrl(path: string, contentType: string) {
+  async uploadUrl(path: string, contentType: string, sizeHeaders: Record<string, string> = UPLOAD_SIZE_HEADERS) {
     const [url] = await this.bucket.file(path).getSignedUrl({
       version: "v4",
       action: "write",
       contentType,
-      extensionHeaders: UPLOAD_SIZE_HEADERS,
+      extensionHeaders: sizeHeaders,
       expires: Date.now() + UPLOAD_TTL_MS,
     });
     return url;
   }
 
-  async readUrl(path: string) {
-    const [url] = await this.bucket
-      .file(path)
-      .getSignedUrl({ version: "v4", action: "read", expires: Date.now() + READ_TTL_MS });
+  async readUrl(path: string, { ttlMs = READ_TTL_MS, downloadName }: ReadUrlOptions = {}) {
+    const [url] = await this.bucket.file(path).getSignedUrl({
+      version: "v4",
+      action: "read",
+      expires: Date.now() + ttlMs,
+      ...(downloadName && { responseDisposition: `attachment; filename="${downloadName.replace(/["\\]/g, "")}"` }),
+    });
     return url;
   }
 
@@ -61,12 +73,13 @@ export class MemoryBlobs implements SampleBlobs {
     this.objects.set(path, bytes);
   }
 
-  async uploadUrl(path: string, contentType: string) {
-    return `https://storage.test/${path}?put&type=${encodeURIComponent(contentType)}`;
+  async uploadUrl(path: string, contentType: string, sizeHeaders: Record<string, string> = UPLOAD_SIZE_HEADERS) {
+    const range = encodeURIComponent(sizeHeaders["x-goog-content-length-range"] ?? "");
+    return `https://storage.test/${path}?put&type=${encodeURIComponent(contentType)}&range=${range}`;
   }
 
-  async readUrl(path: string) {
-    return `https://storage.test/${path}?get`;
+  async readUrl(path: string, opts: ReadUrlOptions = {}) {
+    return `https://storage.test/${path}?get${opts.downloadName ? `&download=${encodeURIComponent(opts.downloadName)}` : ""}`;
   }
 
   async size(path: string) {

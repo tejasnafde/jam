@@ -10,6 +10,7 @@ import { LibrarySection } from "@/features/library/LibrarySection";
 import { PlanSection } from "@/features/plan/PlanSection";
 import { SessionsSection } from "@/features/sessions/SessionsSection";
 import type { SessionsHandle } from "@/features/sessions/useSessions";
+import type { SharesHandle } from "@/features/share/useShares";
 import type { PrepHandle } from "@/features/prep/usePrep";
 import { soundCount, type SoundItem } from "@/features/sounds/catalog";
 import { SoundsSection } from "@/features/sounds/SoundsSection";
@@ -35,6 +36,8 @@ export interface SidePanelProps {
   onDeleteSample: (id: string) => void;
   prep?: PrepHandle;
   sessions?: SessionsHandle;
+  /** The user's share links, shown under their sessions. */
+  shares?: SharesHandle;
   coach?: CoachHandle;
   /** Inserts a sound at the editor's cursor. False when the editor is not ready. */
   onInsertSound?: (item: SoundItem) => boolean;
@@ -93,7 +96,7 @@ export function SidePanel(props: SidePanelProps) {
               open={sessionsOpen}
               onOpenChange={setSessionsOpen}
             >
-              <SessionsSection signedIn={!!profile} sessions={props.sessions} />
+              <SessionsSection signedIn={!!profile} sessions={props.sessions} shares={props.shares} />
             </PanelCard>
           )}
           <PanelCard title="Sounds" meta={soundsMeta} open={soundsOpen} onOpenChange={setSoundsOpen}>

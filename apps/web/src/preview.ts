@@ -1,7 +1,8 @@
 // Fixture data for the dev-only ?preview mode (layout screenshots). Never bundled in production.
-import type { CoachEvent, CoachThread, SampleWithUrl, Session, VersionEntry } from "@jam/shared";
+import type { CoachEvent, CoachThread, SampleWithUrl, Session, Share, VersionEntry } from "@jam/shared";
 import type { CoachHandle } from "./features/coach/useCoach";
 import type { SessionsHandle } from "./features/sessions/useSessions";
+import type { SharesHandle } from "./features/share/useShares";
 import type { PanelOverride } from "./App";
 
 const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
@@ -55,6 +56,42 @@ export const PREVIEW_SESSIONS: SessionsHandle = {
     return { versions: page, nextBefore: start + 10 < versions.length ? (page.at(-1)?.createdAt ?? null) : null };
   },
 };
+
+const share = (id: string, title: string, seconds: number, plays: number, minutes: number, enabled = true): Share => ({
+  id,
+  sessionId: "s1",
+  versionId: "v0",
+  title,
+  ownerName: "Tejas",
+  asOf: ago(minutes + 2),
+  bars: Math.round(seconds * 0.35),
+  seconds,
+  showCode: false,
+  enabled,
+  createdAt: ago(minutes),
+  plays,
+});
+
+/** Share links of "Rainy lofi loop". Turning one off or on works in memory. */
+export function previewShares(): SharesHandle {
+  const list = [
+    share("pv1aaaaaaa", "Rainy lofi loop", 38.4, 12, 35),
+    share("pv2bbbbbbb", "lofi, first idea", 22.9, 3, 60 * 30),
+    share("pv3ccccccc", "lofi sketch", 45.7, 0, 60 * 50, false),
+  ];
+  const handle: SharesHandle = {
+    shares: list,
+    setEnabled: async (id, enabled) => {
+      handle.shares = handle.shares.map((x) => (x.id === id ? { ...x, enabled } : x));
+    },
+    remove: async (id) => {
+      handle.shares = handle.shares.filter((x) => x.id !== id);
+    },
+    refresh: async () => {},
+    added: () => {},
+  };
+  return handle;
+}
 
 const event = (
   id: string,
@@ -169,6 +206,7 @@ export const PREVIEW_PANEL: PanelOverride = {
     sample("s3", "nightdrive_vocals", "stem", 212.6, { bpm: 92, key: "A minor", stem: "vocals", parentId: "s2" }),
   ],
   sessions: PREVIEW_SESSIONS,
+  shares: previewShares(),
   coach: previewCoach(THREAD, true),
   uploadingSample: false,
   onUploadSample: () => {},

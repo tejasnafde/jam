@@ -65,6 +65,35 @@ stop typing. Expand a session to page through its versions: Preview shows the co
 the editor as a new edit (it does not play it). Versions from before sessions belong to a session named "Untitled",
 made on first load.
 
+### Share
+
+Share (top bar, after the code has played once) gives a friend a link to listen. It is read only, and the friend
+does not sign in.
+
+- **A frozen copy.** A share is a snapshot of the session's latest version. Later edits do not change it. When
+  Strudel still holds another session's pattern (opening a session does not play it), Share evaluates the shown
+  session's code first, or refuses when it does not evaluate.
+- **One pass.** The dialog guesses the length of one pass of the playing `$:` pattern: the sum of an `arrange(...)`,
+  else the bars after which the `<...>` sequences and the layers line up again (least common multiple, with `!n`,
+  `/n`, `*n`, nested sequences, `.slow(n)` and `.fast(n)`), else 8 bars ("guessed"). It shows bars and m:ss at the
+  current tempo, and you can edit the bars (at most 4 minutes).
+- **Recorded in real time.** jam restarts the pattern at cycle 0 with a copy that has no note after the last bar,
+  records Strudel's own output for that length plus a 2 s tail, then puts the pattern and the playback back as they
+  were. Keep the tab open: a hidden tab stops the recording, because the browser slows the scheduler there. It
+  uploads a 16-bit WAV (mono, then a lower rate, when stereo would pass 25 MB) to `shares/{id}.wav` in the samples
+  bucket, with 240 waveform peaks. Strudel 1.3's `renderPatternAudio` is not used: it closes the live AudioContext
+  and starts a download, and superdough shares one node pool across contexts.
+- **The page.** `/s/{id}` needs no sign-in: title, "by Tejas, as of ...", play, a waveform, Download, and the code only
+  when "Show the code" was on. The page reads only metadata and the stored peaks; the player streams the audio from
+  `/api/public/shares/{id}/audio`, which redirects to a fresh 15-minute signed URL on each request (`?download` for an
+  attachment). The server puts Open Graph tags (with `og:audio`) in the page for link previews.
+- **Your links.** Each session in Sessions has a "3 links" line that opens its links, with length and plays: Copy link,
+  Turn off, Turn on, and Delete for a turned-off link (it removes the file). A turned-off link keeps its file; the page
+  stops at once, and audio already open stops within 15 minutes. At most 50 links are on per user.
+- **Cleanup.** Deleting a session deletes its links and their files. A link whose session is gone anyway is listed
+  under "Links of deleted sessions". A cancelled or failed recording deletes its unfinished link; one left by a closed
+  tab is swept (with its file) when the user next starts a link, an hour later. A user can have 3 unfinished links.
+
 ## Connect claude.ai or ChatGPT
 
 Both use OAuth: you paste one URL, and jam asks you to sign in and allow the connection.

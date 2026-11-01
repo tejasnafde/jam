@@ -28,7 +28,15 @@ function sessionParam(req: Request, res: Response): string | null {
 
 const notFound = (res: Response) => res.status(404).json({ error: "not_found" });
 
-export function sessionsRouter(store: Store, now: () => number) {
+/**
+ * Sessions of the signed-in user. `beforeDelete` runs for a session that exists, before it is
+ * deleted: share links of the session are removed there, so none outlive their piece.
+ */
+export function sessionsRouter(
+  store: Store,
+  now: () => number,
+  beforeDelete: (uid: string, sessionId: string) => Promise<void> = async () => {},
+) {
   const router = Router();
 
   router.get(
@@ -101,7 +109,10 @@ export function sessionsRouter(store: Store, now: () => number) {
     asyncHandler(async (req, res) => {
       const id = sessionParam(req, res);
       if (!id) return;
-      if (!(await store.deleteSession(pageUser(req).uid, id))) return notFound(res);
+      const { uid } = pageUser(req);
+      if (!(await store.getSession(uid, id))) return notFound(res);
+      await beforeDelete(uid, id);
+      if (!(await store.deleteSession(uid, id))) return notFound(res);
       res.status(204).end();
     }),
   );

@@ -14,6 +14,7 @@ import { GcsBlobs } from "./store/blobs.js";
 import { FirestoreStore } from "./store/firestore.js";
 import { FirestoreSampleStore } from "./store/firestoreSamples.js";
 import { FirestorePrepStore } from "./store/prep.js";
+import { FirestoreShareStore } from "./store/shares.js";
 
 const config = loadConfig();
 const log = createLogger(config.LOG_LEVEL);
@@ -31,6 +32,7 @@ const app = createApp({
   store: new FirestoreStore(db),
   samples: new FirestoreSampleStore(db, log),
   blobs: new GcsBlobs(getStorage(firebase).bucket(SAMPLE_BUCKET)),
+  shares: new FirestoreShareStore(db),
   sounds: new SoundIndex(),
   verifyIdToken: async (idToken) => {
     const decoded = await auth.verifyIdToken(idToken);
