@@ -56,7 +56,9 @@ export function isRenderRequest(v: unknown): v is RenderRequest {
     finite(v.tailSeconds) &&
     v.tailSeconds >= 0 &&
     isObject(map) &&
-    Object.values(map).every((u) => typeof u === "string" || (Array.isArray(u) && u.every((x) => typeof x === "string")))
+    Object.values(map).every(
+      (u) => typeof u === "string" || (Array.isArray(u) && u.every((x) => typeof x === "string")),
+    )
   );
 }
 
@@ -153,7 +155,8 @@ export async function renderInFrame(
   frame.title = "Share render";
   frame.setAttribute("aria-hidden", "true");
   frame.tabIndex = -1;
-  frame.style.cssText = "position:fixed;width:1px;height:1px;left:-10px;top:-10px;border:0;opacity:0;pointer-events:none";
+  frame.style.cssText =
+    "position:fixed;width:1px;height:1px;left:-10px;top:-10px;border:0;opacity:0;pointer-events:none";
   const started = Date.now();
   const left = () => Math.max(1, timeoutMs - (Date.now() - started));
   try {

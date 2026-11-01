@@ -10,7 +10,14 @@ import {
   type RenderReply,
 } from "./protocol";
 
-const REQUEST = { type: "render", code: 's("bd")', cycles: 4, cps: 0.5, tailSeconds: 2, sampleMap: { kick: "https://x/k.wav" } };
+const REQUEST = {
+  type: "render",
+  code: 's("bd")',
+  cycles: 4,
+  cps: 0.5,
+  tailSeconds: 2,
+  sampleMap: { kick: "https://x/k.wav" },
+};
 const STATS = { cps: 0.5, seconds: 10, sampleRate: 48_000, peak: 0.7, firstSoundSec: 0, renderMs: 900 };
 
 /** A port the test drives by hand. */

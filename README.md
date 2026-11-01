@@ -77,12 +77,21 @@ does not sign in.
   else the bars after which the `<...>` sequences and the layers line up again (least common multiple, with `!n`,
   `/n`, `*n`, nested sequences, `.slow(n)` and `.fast(n)`), else 8 bars ("guessed"). It shows bars and m:ss at the
   current tempo, and you can edit the bars (at most 4 minutes).
-- **Recorded in real time.** jam restarts the pattern at cycle 0 with a copy that has no note after the last bar,
-  records Strudel's own output for that length plus a 2 s tail, then puts the pattern and the playback back as they
-  were. Keep the tab open: a hidden tab stops the recording, because the browser slows the scheduler there. It
-  uploads a 16-bit WAV (mono, then a lower rate, when stereo would pass 25 MB) to `shares/{id}.wav` in the samples
-  bucket, with 240 waveform peaks. Strudel 1.3's `renderPatternAudio` is not used: it closes the live AudioContext
-  and starts a download, and superdough shares one node pool across contexts.
+- **Made in the background.** After "Create link" the dialog closes at once, and a chip in the top bar shows
+  "Preparing link..." with progress, then "Link ready" with Copy link (and a toast). The music keeps playing and you
+  can keep editing: the page's AudioContext and scheduler are not touched. A hidden same-origin frame
+  (`/render.html`) loads its own copy of the Strudel REPL, so its superdough, node pools and AudioContext belong to
+  that frame alone. It registers your Library samples, evaluates the version's code, cuts every note that starts after
+  the last bar, and renders the bars plus a 2 s tail in an `OfflineAudioContext` (as Strudel's `renderPatternAudio`
+  does, but without closing anything or starting a download). Each note waits for its sample before the render starts,
+  and the render waits for the reverb impulse responses, so the first hits and the room are there. A 38 s piece
+  renders in about 3 s. The frame sends back the WAV (16-bit; mono, then a lower rate, when stereo would pass 25 MB)
+  and 240 waveform peaks, and the page uploads it to `shares/{id}.wav` in the samples bucket.
+- **Record in real time instead.** When the render fails, takes more than 60 s, or comes out silent while your music
+  is audible, the toast offers Retry and "Record in real time instead". That opens the dialog with the same choices,
+  and it records as before: jam restarts the pattern at cycle 0 with a copy that has no note after the last bar,
+  records Strudel's own output for that length plus the tail, then puts the pattern and the playback back as they
+  were. Keep the tab open for it: a hidden tab stops the recording, because the browser slows the scheduler there.
 - **The page.** `/s/{id}` needs no sign-in: title, "by Tejas, as of ...", play, a waveform, Download, and the code only
   when "Show the code" was on. The page reads only metadata and the stored peaks; the player streams the audio from
   `/api/public/shares/{id}/audio`, which redirects to a fresh 15-minute signed URL on each request (`?download` for an
