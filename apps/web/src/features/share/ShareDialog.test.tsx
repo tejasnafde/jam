@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Scheduler } from "@/features/editor/strudelTypes";
 import { createApi } from "@/lib/api";
@@ -50,7 +51,10 @@ function fakeServer() {
   return calls;
 }
 
-function renderDialog(playCode: (code: string) => Promise<boolean>) {
+function renderDialog(
+  playCode: (code: string) => Promise<boolean>,
+  extra: Partial<ComponentProps<typeof ShareDialog>> = {},
+) {
   // Strudel still holds session A's pattern.
   const scheduler: Scheduler = { pattern: "session A", start: vi.fn(), stop: vi.fn() };
   const onCreated = vi.fn();
@@ -67,6 +71,7 @@ function renderDialog(playCode: (code: string) => Promise<boolean>) {
       playCode={playCode}
       flushVersions={() => {}}
       onCreated={onCreated}
+      {...extra}
     />,
   );
   return { onCreated };
@@ -120,5 +125,53 @@ describe("ShareDialog", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Create link" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("The tab was hidden.");
     await waitFor(() => expect(calls).toContain(`DELETE /shares/${SHARE.id}`));
+  });
+
+  it("hands a background share over and closes at once, without touching the playback", async () => {
+    const calls = fakeServer();
+    const playCode = vi.fn(async () => true);
+    const startOffline = vi.fn();
+    const onOpenChange = vi.fn();
+    renderDialog(playCode, { startOffline, onOpenChange });
+    fireEvent.click(await screen.findByRole("button", { name: "Create link" }));
+    expect(startOffline).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "b",
+        versionId: "vB",
+        code: SESSION_B,
+        bars: 3,
+        cps: 0.5,
+        title: "Session B",
+      }),
+    );
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(playCode).not.toHaveBeenCalled();
+    expect(capturePass).not.toHaveBeenCalled();
+    expect(calls).not.toContain("POST /shares");
+  });
+
+  it("records in real time with the choices of a background share that failed", async () => {
+    fakeServer();
+    const startOffline = vi.fn();
+    const draft = {
+      sessionId: "b",
+      versionId: "vB",
+      code: SESSION_B,
+      title: "My intro",
+      ownerName: "T",
+      bars: 2,
+      cps: 0.5,
+      showCode: true,
+    };
+    const { onCreated } = renderDialog(async () => true, { startOffline, realtime: draft });
+    fireEvent.click(await screen.findByRole("button", { name: "Record in real time" }));
+    await waitFor(() => expect(onCreated).toHaveBeenCalled());
+    expect(startOffline).not.toHaveBeenCalled();
+    expect(capturePass).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ cycles: 2 }),
+      expect.any(Function),
+      expect.any(AbortSignal),
+    );
   });
 });

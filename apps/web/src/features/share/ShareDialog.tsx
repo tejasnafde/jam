@@ -27,6 +27,7 @@ import { cn } from "@/lib/utils";
 import { asOfText } from "./asOf";
 import { CaptureCancelled, capturePass } from "./capture";
 import { barsToSeconds, clampBars, guessPlay, maxBarsAt } from "./length";
+import type { ShareDraft } from "./offlineShare";
 import { computePeaks } from "./peaks";
 import { shareWav } from "./wavFile";
 
@@ -64,6 +65,10 @@ export interface ShareDialogViewProps {
   onShowCode: (on: boolean) => void;
   onCreate: () => void;
   onCancelRecording: () => void;
+  /** "offline": the link is made in the background. "realtime": one pass is recorded from bar 1. */
+  mode?: "offline" | "realtime";
+  /** A note that is not an error, e.g. that the code changed since a background share failed. */
+  notice?: string | null;
 }
 
 function Row({ label, children, className }: { label: string; children: ReactNode; className?: string }) {
@@ -218,13 +223,16 @@ export function ShareDialogView(p: ShareDialogViewProps) {
                 </>
               ) : (
                 <span className="text-muted-foreground">
-                  Ready after one recorded pass. It plays from bar 1 while it records, so keep this tab open.
+                  {p.mode === "offline"
+                    ? "Made in the background. Your music keeps playing, and the top bar says when the link is ready. Keep this tab open until then."
+                    : "Ready after one recorded pass. It plays from bar 1 while it records, so keep this tab open."}
                 </span>
               )}
             </Row>
           </dl>
         )}
 
+        {p.notice && <p className="text-sm text-muted-foreground">{p.notice}</p>}
         {p.error && (
           <p role="alert" className="text-sm text-destructive">
             {p.error}
@@ -279,7 +287,7 @@ export function ShareDialogView(p: ShareDialogViewProps) {
               </Button>
               <Button onClick={p.onCreate} disabled={p.phase.kind !== "form" || !p.title.trim() || !p.ownerName.trim()}>
                 <Link2 />
-                Create link
+                {p.mode === "realtime" ? "Record in real time" : "Create link"}
               </Button>
             </>
           )}
@@ -308,6 +316,13 @@ interface Props {
   /** Saves a Live version that waits, so the latest version is the code that plays. */
   flushVersions: () => void;
   onCreated: (share: Share) => void;
+  /**
+   * Makes the link in the background (offline render) and closes the dialog at once. Without it,
+   * or with `realtime`, the dialog records one pass in real time.
+   */
+  startOffline?: (draft: ShareDraft) => void;
+  /** Record in real time, with the choices of a background share that could not be used. */
+  realtime?: ShareDraft | null;
 }
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
@@ -328,16 +343,20 @@ export function ShareDialog({
   playCode,
   flushVersions,
   onCreated,
+  startOffline,
+  realtime = null,
 }: Props) {
+  const offline = !!startOffline && !realtime;
   const [phase, setPhase] = useState<SharePhase>({ kind: "loading" });
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [version, setVersion] = useState<VersionEntry | null>(null);
-  const [title, setTitle] = useState(sessionName);
-  const [ownerName, setOwnerName] = useState(() => firstName(displayName));
+  const [title, setTitle] = useState(realtime?.title ?? sessionName);
+  const [ownerName, setOwnerName] = useState(() => realtime?.ownerName ?? firstName(displayName));
   const [bars, setBars] = useState(8);
   const [barsGuessed, setBarsGuessed] = useState(false);
   const [label, setLabel] = useState("");
-  const [showCode, setShowCode] = useState(false);
+  const [showCode, setShowCode] = useState(realtime?.showCode ?? false);
   const [cps, setCps] = useState(0.5);
   const abort = useRef<AbortController | null>(null);
 
@@ -351,8 +370,16 @@ export function ShareDialog({
     const guess = guessPlay(latest.code);
     setCps(tempo);
     setLabel(guess.label);
-    setBars(Math.min(guess.bars, maxBarsAt(tempo)));
-    setBarsGuessed(guess.source === "default" || guess.capped || guess.bars > maxBarsAt(tempo));
+    if (realtime) {
+      setBars(Math.min(realtime.bars, maxBarsAt(tempo)));
+      // A share is always of the latest version (the server refuses an older one), so say so.
+      if (latest.id !== realtime.versionId) {
+        setNotice("Your code changed since the background share started. This records the latest version.");
+      }
+    } else {
+      setBars(Math.min(guess.bars, maxBarsAt(tempo)));
+      setBarsGuessed(guess.source === "default" || guess.capped || guess.bars > maxBarsAt(tempo));
+    }
     setPhase({ kind: "form" });
   };
 
@@ -374,6 +401,21 @@ export function ShareDialog({
 
   const create = async () => {
     if (!version) return;
+    if (offline) {
+      // The hidden frame evaluates the code itself, so the page's playback is not touched.
+      startOffline?.({
+        sessionId,
+        versionId: version.id,
+        code: version.code,
+        title: title.trim(),
+        ownerName: ownerName.trim(),
+        bars,
+        cps,
+        showCode,
+      });
+      onOpenChange(false);
+      return;
+    }
     const client = sharesApi(api);
     const controller = new AbortController();
     abort.current = controller;
@@ -465,6 +507,8 @@ export function ShareDialog({
       onShowCode={setShowCode}
       onCreate={() => void create()}
       onCancelRecording={() => abort.current?.abort()}
+      mode={offline ? "offline" : realtime ? "realtime" : undefined}
+      notice={notice}
     />
   );
 }

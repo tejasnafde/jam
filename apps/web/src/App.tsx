@@ -19,8 +19,11 @@ import { useCoach } from "@/features/coach/useCoach";
 import { usePlan } from "@/features/plan/usePlan";
 import { usePrep } from "@/features/prep/usePrep";
 import { SessionName } from "@/features/sessions/SessionName";
+import type { ShareDraft } from "@/features/share/offlineShare";
 import { ShareDialog } from "@/features/share/ShareDialog";
+import { ShareStatus } from "@/features/share/ShareStatus";
 import { evaluateShown } from "@/features/share/shownCode";
+import { copyLink, useShareJob } from "@/features/share/useShareJob";
 import { useShares } from "@/features/share/useShares";
 import { useSessions, type EditorBridge } from "@/features/sessions/useSessions";
 import { preventFileNavigation } from "@/features/sounds/dragState";
@@ -70,6 +73,8 @@ export function App({ panelOverride }: { panelOverride?: PanelOverride }) {
     void refreshSessions().catch(console.error);
     void refreshCoach().catch(console.error);
   }, [refreshSessions, refreshCoach, getSessionId]);
+  // Set when a background share could not be used and the user chose to record it in real time.
+  const [realtimeDraft, setRealtimeDraft] = useState<ShareDraft | null>(null);
   const [playing, setPlaying] = useState(false);
   const [panelOpen, setPanelOpen] = useLocalStorageFlag("jam:panel", true);
   const [live, setLive] = useLocalStorageFlag("jam:live", false);
@@ -141,14 +146,36 @@ export function App({ panelOverride }: { panelOverride?: PanelOverride }) {
   // The dev preview has no account: its API calls go to /api, where a screenshot script can answer them.
   const shareApi = auth.api ?? (panelOverride ? previewApi : null);
   const openSession = panel.sessions?.sessions.find((s) => s.id === panel.sessions?.currentId) ?? null;
-  const canShare = !!panel.profile && !!openSession && (evaluated || playing);
+  const sampleMap = useMemo(() => Object.fromEntries(library.samples.map((s) => [s.name, s.url])), [library.samples]);
+  const shareJob = useShareJob({
+    api: shareApi,
+    sampleMap,
+    onCreated: panel.shares?.added ?? shares.added,
+    onRealtime: (draft) => {
+      setRealtimeDraft(draft);
+      setShareOpen(true);
+    },
+  });
+  const preparing = shareJob.job.kind === "preparing";
+  const canShare = !!panel.profile && !!openSession && (evaluated || playing) && !preparing;
+  const shareStatus = (
+    <ShareStatus
+      job={shareJob.job}
+      onCopy={(url) => void copyLink(url)}
+      onRetry={shareJob.retry}
+      onRealtime={shareJob.realtime}
+      onDismiss={shareJob.dismiss}
+    />
+  );
   const shareButton = panel.profile ? (
     <Button
       variant="ghost"
       size="sm"
       onClick={() => setShareOpen(true)}
       disabled={!canShare}
-      title={canShare ? "Share a link to listen" : "Play the code once, then share it"}
+      title={
+        preparing ? "A link is being made" : canShare ? "Share a link to listen" : "Play the code once, then share it"
+      }
       className="gap-1.5 text-muted-foreground hover:text-foreground"
     >
       <Share2 className="size-4" />
@@ -172,14 +199,20 @@ export function App({ panelOverride }: { panelOverride?: PanelOverride }) {
         status={<SaveStatus status={status.value} stamp={status.stamp} />}
         tools={
           <>
+            {/* A phone shows the chip in the strip below the bar, where it has room. */}
+            <div className="max-md:hidden">{shareStatus}</div>
             {shareButton}
             <Booth getCps={() => editor.current?.getCps() ?? null} library={library} />
           </>
         }
         account={account}
+        hideShortcuts={shareJob.job.kind !== "idle"}
       />
-      {sessionName && (
-        <div className="flex h-10 flex-none items-center border-b border-hairline px-2 md:hidden">{sessionName}</div>
+      {(sessionName || shareJob.job.kind !== "idle") && (
+        <div className="flex h-10 flex-none items-center gap-2 border-b border-hairline px-2 md:hidden">
+          <div className="flex min-w-0 flex-1 items-center">{sessionName}</div>
+          {shareStatus}
+        </div>
       )}
       <main
         className={cn(
@@ -209,7 +242,10 @@ export function App({ panelOverride }: { panelOverride?: PanelOverride }) {
       {shareOpen && shareApi && openSession && panel.profile && (
         <ShareDialog
           open={shareOpen}
-          onOpenChange={setShareOpen}
+          onOpenChange={(next) => {
+            setShareOpen(next);
+            if (!next) setRealtimeDraft(null);
+          }}
           api={shareApi}
           sessionId={openSession.id}
           sessionName={openSession.name}
@@ -219,6 +255,8 @@ export function App({ panelOverride }: { panelOverride?: PanelOverride }) {
           playCode={(code) => evaluateShown(editor.current, code)}
           flushVersions={() => control.current?.flushVersions()}
           onCreated={panel.shares?.added ?? shares.added}
+          startOffline={shareJob.start}
+          realtime={realtimeDraft}
         />
       )}
     </div>
