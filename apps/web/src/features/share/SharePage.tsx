@@ -1,4 +1,4 @@
-import { formatDuration, type PublicShare } from "@jam/shared";
+import { formatDuration, SHARE_LIMITS, shareAudioPath, type PublicShare } from "@jam/shared";
 import { ArrowRight, Download, Loader2, Pause, Play, RotateCcw } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent } from "react";
 import { Logo } from "@/components/Logo";
@@ -7,10 +7,9 @@ import { ApiError } from "@/lib/api";
 import { countPlay, fetchPublicShare } from "@/lib/share-api";
 import { cn } from "@/lib/utils";
 import { asOfText } from "./asOf";
-import { computePeaks } from "./peaks";
 
-/** Peaks kept from the file; the waveform pools them down to what fits its width. */
-const PEAKS = 240;
+/** Peaks stored with the share; the waveform pools them down to what fits its width. */
+const PEAKS = SHARE_LIMITS.peaks;
 
 /** Max-pools peaks down to `count` bars. */
 const pool = (peaks: number[], count: number) =>
@@ -19,27 +18,10 @@ const pool = (peaks: number[], count: number) =>
   );
 
 type Load =
-  | { kind: "loading" }
-  | { kind: "off" }
-  | { kind: "failed"; message: string }
-  | { kind: "ready"; share: PublicShare; src: string; peaks: number[]; duration: number };
+  { kind: "loading" } | { kind: "off" } | { kind: "failed"; message: string } | { kind: "ready"; share: PublicShare };
 
-/** Fetches the file once: a blob URL for the player, and its peaks for the waveform. */
-async function loadAudio(url: string): Promise<{ src: string; peaks: number[]; duration: number }> {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`The audio did not load (HTTP ${res.status}).`);
-  const bytes = await res.arrayBuffer();
-  const src = URL.createObjectURL(new Blob([bytes], { type: "audio/wav" }));
-  try {
-    const decoder = new OfflineAudioContext(1, 1, 44_100);
-    const audio = await decoder.decodeAudioData(bytes.slice(0));
-    const channels = Array.from({ length: audio.numberOfChannels }, (_, c) => audio.getChannelData(c));
-    return { src, peaks: computePeaks(channels, PEAKS), duration: audio.duration };
-  } catch {
-    // The player can still play it; the waveform stays flat.
-    return { src, peaks: new Array<number>(PEAKS).fill(0.15), duration: 0 };
-  }
-}
+/** A flat waveform, for a share stored without peaks. */
+const FLAT = new Array<number>(PEAKS).fill(0.15);
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
@@ -124,19 +106,20 @@ export function SharePage({ id }: { id: string }) {
   const [playing, setPlaying] = useState(false);
   const [ended, setEnded] = useState(false);
   const [time, setTime] = useState(0);
+  // From the file's metadata once the player has it; the share's length until then.
+  const [fileDuration, setFileDuration] = useState(0);
   const audio = useRef<HTMLAudioElement | null>(null);
   const counted = useRef(false);
 
+  // Only the metadata loads here. The player streams the audio when Play is pressed, so a page view
+  // that never plays costs no download.
   useEffect(() => {
     let cancelled = false;
-    let src: string | null = null;
     (async () => {
       try {
         const share = await fetchPublicShare(id);
         document.title = `${share.title} - jam`;
-        const file = await loadAudio(share.audioUrl);
-        src = file.src;
-        if (!cancelled) setLoad({ kind: "ready", share, ...file });
+        if (!cancelled) setLoad({ kind: "ready", share });
       } catch (err) {
         if (cancelled) return;
         if (err instanceof ApiError && err.status === 404) setLoad({ kind: "off" });
@@ -145,7 +128,6 @@ export function SharePage({ id }: { id: string }) {
     })();
     return () => {
       cancelled = true;
-      if (src) URL.revokeObjectURL(src);
     };
   }, [id]);
 
@@ -195,8 +177,10 @@ export function SharePage({ id }: { id: string }) {
     );
   }
 
-  const { share, src, peaks } = load;
-  const duration = load.duration || share.seconds;
+  const { share } = load;
+  const peaks = share.peaks?.length ? share.peaks : FLAT;
+  const src = shareAudioPath(share.id);
+  const duration = fileDuration || share.seconds + SHARE_LIMITS.tailSeconds;
   const progress = duration ? Math.min(1, time / duration) : 0;
 
   const toggle = async () => {
@@ -207,7 +191,13 @@ export function SharePage({ id }: { id: string }) {
       el.currentTime = 0;
       setEnded(false);
     }
-    await el.play();
+    try {
+      await el.play();
+    } catch (err) {
+      // A load failure also fires the element's error event, which shows the message.
+      console.error(err);
+      return;
+    }
     if (!counted.current) {
       counted.current = true;
       void countPlay(share.id);
@@ -264,7 +254,7 @@ export function SharePage({ id }: { id: string }) {
               <span className="text-muted-foreground"> / {formatDuration(duration)}</span>
             </span>
             <Button variant="ghost" size="sm" asChild className="text-muted-foreground hover:text-foreground">
-              <a href={share.downloadUrl} download>
+              <a href={`${src}?download`} download>
                 <Download />
                 Download
               </a>
@@ -273,7 +263,11 @@ export function SharePage({ id }: { id: string }) {
           <audio
             ref={audio}
             src={src}
-            preload="auto"
+            preload="metadata"
+            onLoadedMetadata={(e) =>
+              Number.isFinite(e.currentTarget.duration) && setFileDuration(e.currentTarget.duration)
+            }
+            onError={() => setLoad({ kind: "failed", message: "The audio did not load." })}
             onPlay={() => setPlaying(true)}
             onPause={() => setPlaying(false)}
             onEnded={() => {

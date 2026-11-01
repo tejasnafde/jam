@@ -3,6 +3,7 @@ import {
   type CreateShareRequest,
   type CreateShareResponse,
   type PublicShare,
+  type ReadyShareRequest,
   type Share,
   type ShareListResponse,
   type UpdateShareRequest,
@@ -17,7 +18,10 @@ export function sharesApi(api: Api) {
   return {
     list: async () => (await api.request<ShareListResponse>("/shares")).shares,
     create: (body: CreateShareRequest) => send<CreateShareResponse>("POST", "/shares", body),
-    ready: (id: string) => send<Share>("POST", `/shares/${encodeURIComponent(id)}/ready`),
+    ready: (id: string, body: ReadyShareRequest = {}) =>
+      send<Share>("POST", `/shares/${encodeURIComponent(id)}/ready`, body),
+    /** Deletes the link and its file. */
+    remove: (id: string) => send<null>("DELETE", `/shares/${encodeURIComponent(id)}`),
     update: (id: string, body: UpdateShareRequest) => send<Share>("PATCH", `/shares/${encodeURIComponent(id)}`, body),
     /** PUTs the WAV to the signed URL, with the size header the URL was signed with. */
     async put(uploadUrl: string, file: Blob, signal?: AbortSignal) {

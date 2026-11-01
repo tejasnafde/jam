@@ -11,9 +11,11 @@ export interface ShareRecord extends Share {
   code: string | null;
   /** False until the audio is uploaded and checked. A share that never gets ready is never listed. */
   ready: boolean;
+  /** The waveform the page draws, set when the share gets ready. */
+  peaks?: number[] | null;
 }
 
-export type SharePatch = Partial<Pick<ShareRecord, "enabled" | "title" | "ready">>;
+export type SharePatch = Partial<Pick<ShareRecord, "enabled" | "title" | "ready" | "peaks">>;
 
 export interface ShareStore {
   create(share: ShareRecord): Promise<void>;
@@ -22,10 +24,19 @@ export interface ShareStore {
   listByOwner(uid: string): Promise<ShareRecord[]>;
   update(id: string, patch: SharePatch): Promise<void>;
   addPlay(id: string): Promise<void>;
+  /** Removes the record. A missing record is not an error. */
+  delete(id: string): Promise<void>;
 }
 
-/** What the owner sees: the record without uid, storage path, code and ready. */
-export function ownerView({ uid: _uid, storagePath: _path, code: _code, ready: _ready, ...share }: ShareRecord): Share {
+/** What the owner sees: the record without uid, storage path, code, ready and peaks. */
+export function ownerView({
+  uid: _uid,
+  storagePath: _path,
+  code: _code,
+  ready: _ready,
+  peaks: _peaks,
+  ...share
+}: ShareRecord): Share {
   return share;
 }
 
@@ -60,6 +71,10 @@ export class MemoryShareStore implements ShareStore {
   async addPlay(id: string) {
     const share = this.shares.get(id);
     if (share) share.plays += 1;
+  }
+
+  async delete(id: string) {
+    this.shares.delete(id);
   }
 }
 
@@ -96,5 +111,9 @@ export class FirestoreShareStore implements ShareStore {
     await this.col()
       .doc(id)
       .update({ plays: FieldValue.increment(1) });
+  }
+
+  async delete(id: string) {
+    await this.col().doc(id).delete();
   }
 }

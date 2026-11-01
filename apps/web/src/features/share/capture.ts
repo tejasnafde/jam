@@ -61,11 +61,15 @@ interface Block {
   r: Float32Array;
 }
 
-/** Places the recorded blocks on one timeline from startFrame; gaps (no input) stay silent. */
+/**
+ * Places the recorded blocks on one timeline from startFrame; gaps (no input) stay silent.
+ * It empties `blocks` as it goes, so a long pass is not held twice in memory.
+ */
 export function assemble(blocks: Block[], startFrame: number, frames: number): [Float32Array, Float32Array] {
   const left = new Float32Array(frames);
   const right = new Float32Array(frames);
-  for (const b of blocks) {
+  blocks.reverse();
+  for (let b = blocks.pop(); b; b = blocks.pop()) {
     const from = Math.max(0, startFrame - b.frame);
     const at = b.frame + from - startFrame;
     const count = Math.min(b.l.length - from, frames - at);
@@ -94,17 +98,47 @@ export class CaptureCancelled extends Error {
   }
 }
 
-/** How long before the end the scheduler stops, so no note of the next bar is queued. */
-const STOP_EARLY_S = 0.2;
+/** The tab was hidden: the browser slows the scheduler there, so notes drop out of the recording. */
+export const HIDDEN_TAB_MESSAGE = "The tab was hidden, so notes would drop out. Keep this tab open while it records.";
+
+interface Fractionish {
+  valueOf(): number;
+}
+
+/** The parts of a Strudel hap and pattern that untilCycle needs. */
+export interface HapLike {
+  whole?: { begin: Fractionish } | null;
+  part: { begin: Fractionish };
+}
+export interface PatternLike {
+  filterHaps(test: (hap: HapLike) => boolean): unknown;
+}
 
 /**
- * Restarts the scheduler at cycle 0, records `seconds` of music plus `tailSeconds` of fade,
- * then stops the music. Strudel's own pattern plays: nothing is evaluated again.
+ * The pattern without any hap that starts at or after `cycles`. The scheduler queries about 0.3 s
+ * ahead, so stopping it on time is not enough: the next bar's first hit would already be queued.
+ */
+export function untilCycle(pattern: unknown, cycles: number): unknown {
+  return (pattern as PatternLike).filterHaps((hap) => Number((hap.whole ?? hap.part).begin) < cycles);
+}
+
+export interface PassLength {
+  /** Cycles (bars) to play from cycle 0. */
+  cycles: number;
+  /** The same length in seconds at the current tempo. */
+  seconds: number;
+  /** Fade recorded after the last bar. */
+  tailSeconds: number;
+}
+
+/**
+ * Restarts the scheduler at cycle 0 with a copy of the pattern that ends after `cycles`, records
+ * `seconds` of music plus `tailSeconds` of fade, then puts the pattern and the playback back as they
+ * were (music on again from bar 1 when it was on). Nothing is evaluated again.
  */
 export async function capturePass(
   scheduler: Scheduler,
-  seconds: number,
-  tailSeconds: number,
+  { cycles, seconds, tailSeconds }: PassLength,
   onProgress: (p: CaptureProgress) => void,
   signal: AbortSignal,
 ): Promise<Recording> {
@@ -140,15 +174,39 @@ export async function capturePass(
     mute.disconnect();
   };
 
+  const original = scheduler.pattern;
+  const wasPlaying = !!scheduler.started;
+  const pass = untilCycle(original, cycles);
+  let hidden = false;
+  const onVisibility = () => {
+    if (document.hidden) hidden = true;
+  };
+  document.addEventListener("visibilitychange", onVisibility);
+  const interrupted = () => {
+    if (signal.aborted) return new CaptureCancelled();
+    if (hidden || document.hidden) return new Error(HIDDEN_TAB_MESSAGE);
+    return null;
+  };
+  /** Puts the user's pattern back, and the music on again (from bar 1) when it was on before. */
+  const restore = async () => {
+    document.removeEventListener("visibilitychange", onVisibility);
+    scheduler.stop();
+    // A pattern evaluated while it recorded stays; only the cut copy is undone.
+    if (scheduler.pattern === pass) scheduler.pattern = original;
+    if (wasPlaying) await Promise.resolve(scheduler.start()).catch(console.error);
+  };
+
   try {
     scheduler.stop();
+    scheduler.pattern = pass;
     scheduler.seconds_at_cps_change = undefined;
     const pressed = ctx.currentTime;
     await scheduler.start();
     // The scheduler sets the time of cycle 0 on its first tick.
     const t0 = await new Promise<number>((resolve, reject) => {
       const check = () => {
-        if (signal.aborted) return reject(new CaptureCancelled());
+        const stop = interrupted();
+        if (stop) return reject(stop);
         const at = scheduler.seconds_at_cps_change;
         if (typeof at === "number" && (scheduler.num_ticks_since_cps_change ?? 1) > 0) {
           return resolve(at + (scheduler.latency ?? 0.1));
@@ -162,9 +220,11 @@ export async function capturePass(
     let stopped = false;
     await new Promise<void>((resolve, reject) => {
       const tick = () => {
-        if (signal.aborted) return reject(new CaptureCancelled());
+        const stop = interrupted();
+        if (stop) return reject(stop);
         const elapsed = ctx.currentTime - t0;
-        if (!stopped && elapsed >= seconds - STOP_EARLY_S) {
+        // The pattern has no hap after the last bar, so what is queued now is the last bar itself.
+        if (!stopped && elapsed >= seconds) {
           stopped = true;
           scheduler.stop();
         }
@@ -174,15 +234,15 @@ export async function capturePass(
       };
       tick();
     });
-    if (!stopped) scheduler.stop();
     cleanup();
+    await restore();
     // The last block arrives after "stop".
     await new Promise((r) => setTimeout(r, 150));
     const frames = Math.round((seconds + tailSeconds) * ctx.sampleRate);
     return { channels: assemble(blocks, Math.round(t0 * ctx.sampleRate), frames), sampleRate: ctx.sampleRate };
   } catch (err) {
-    scheduler.stop();
     cleanup();
+    await restore();
     throw err;
   }
 }

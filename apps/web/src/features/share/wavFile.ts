@@ -36,12 +36,15 @@ export function planWav(frames: number, sampleRate: number, target: number = SHA
   return { channels: 1, sampleRate: rate, bytes: wavBytes(Math.floor((frames * rate) / sampleRate), 1) };
 }
 
-/** A 16-bit WAV of the recording, under the share size target. */
+/**
+ * A 16-bit WAV of the recording, under the share size target. When it drops to mono, it mixes into
+ * the left channel in place (no third copy of a long pass), so the recording is used up.
+ */
 export function shareWav(channels: [Float32Array, Float32Array], sampleRate: number): Blob {
   const [left, right] = channels;
   const plan = planWav(left.length, sampleRate);
   if (plan.channels === 2) return new Blob([encodeWav([left, right], sampleRate)], { type: "audio/wav" });
-  const mono = new Float32Array(left.length);
+  const mono = left;
   for (let i = 0; i < mono.length; i++) mono[i] = ((left[i] ?? 0) + (right[i] ?? 0)) / 2;
   return new Blob([encodeWav([resample(mono, sampleRate, plan.sampleRate)], plan.sampleRate)], { type: "audio/wav" });
 }

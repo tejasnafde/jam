@@ -1,5 +1,6 @@
 import {
   createShareRequestSchema,
+  readyShareRequestSchema,
   SHARE_ID,
   SHARE_LIMITS,
   SHARE_UPLOAD_HEADERS,
@@ -50,13 +51,26 @@ export interface ShareDeps {
   staticDir?: string;
 }
 
-/** How long the signed read URL of a shared file lives. The page asks for a new one on each load. */
+/** How long the signed read URL of a shared file lives. Each audio request gets a new one. */
 const AUDIO_URL_TTL_MS = 15 * 60_000;
 
 const shareUrl = (publicUrl: string, id: string) => `${publicUrl}/s/${id}`;
 const audioPath = (id: string) => `/s/${id}/audio.wav`;
 
 const isActive = (s: ShareRecord) => s.ready && s.enabled;
+
+/** Removes a share's file, then its record, so no record ever points at a file that is gone. */
+export async function removeShare(shares: ShareStore, blobs: SampleBlobs, share: ShareRecord) {
+  await blobs.remove(share.storagePath);
+  await shares.delete(share.id);
+}
+
+/** Removes every share of a session, with its files: run when the session is deleted. */
+export async function removeSessionShares(shares: ShareStore, blobs: SampleBlobs, uid: string, sessionId: string) {
+  const list = (await shares.listByOwner(uid)).filter((s) => s.sessionId === sessionId);
+  for (const share of list) await removeShare(shares, blobs, share);
+  return list.length;
+}
 
 /** A file name for the download: the title in lowercase letters, digits and dashes. */
 export const downloadName = (title: string) =>
@@ -73,7 +87,7 @@ const limiter = (limits: ShareRateLimits | false, make: (l: ShareRateLimits) => 
 
 const tooMany = (message: string) => ({ error: "rate_limited", message });
 
-/** The owner's shares: start one, mark its upload done, list, turn off and on, rename. */
+/** The owner's shares: start one, mark its upload done, list, turn off and on, rename, delete. */
 export function sharesRouter({ store, shares, blobs, log, now, publicUrl, limits }: ShareDeps) {
   const router = Router();
 
@@ -86,6 +100,21 @@ export function sharesRouter({ store, shares, blobs, log, now, publicUrl, limits
   }));
 
   const activeCount = async (uid: string) => (await shares.listByOwner(uid)).filter(isActive).length;
+
+  /**
+   * Deletes the user's shares that never got ready within pendingTtlMs (a cancel, a closed tab, a
+   * failed upload), with any file. Returns how many unfinished shares are left.
+   */
+  const sweepPending = async (uid: string) => {
+    const cutoff = now() - SHARE_LIMITS.pendingTtlMs;
+    let left = 0;
+    for (const share of await shares.listByOwner(uid)) {
+      if (share.ready) continue;
+      if (Date.parse(share.createdAt) < cutoff) await removeShare(shares, blobs, share);
+      else left++;
+    }
+    return left;
+  };
   const overLimit = (res: Response) =>
     res.status(409).json({
       error: "share_limit",
@@ -129,6 +158,12 @@ export function sharesRouter({ store, shares, blobs, log, now, publicUrl, limits
           .json({ error: "stale_version", message: "The code changed. Open Share again to share the new version." });
       }
       if ((await activeCount(uid)) >= SHARE_LIMITS.activePerUser) return overLimit(res);
+      if ((await sweepPending(uid)) >= SHARE_LIMITS.pendingPerUser) {
+        return res.status(409).json({
+          error: "pending_limit",
+          message: "You are making other links now. Finish them, or wait an hour, then try again.",
+        });
+      }
       const id = randomBytes(8).toString("base64url").slice(0, 10);
       const record: ShareRecord = {
         id,
@@ -145,6 +180,7 @@ export function sharesRouter({ store, shares, blobs, log, now, publicUrl, limits
         storagePath: sharePath(id),
         enabled: false,
         ready: false,
+        peaks: null,
         createdAt: new Date(now()).toISOString(),
         plays: 0,
       };
@@ -163,7 +199,8 @@ export function sharesRouter({ store, shares, blobs, log, now, publicUrl, limits
     "/:id/ready",
     asyncHandler(async (req, res) => {
       const share = await mine(req, res);
-      if (!share) return;
+      const body = share && parseBody(readyShareRequestSchema, req, res);
+      if (!share || !body) return;
       if (share.ready) return res.json(ownerView(share));
       const size = await blobs.size(share.storagePath);
       if (size === null) {
@@ -174,13 +211,14 @@ export function sharesRouter({ store, shares, blobs, log, now, publicUrl, limits
         return res.status(413).json({ error: "too_large", message: "The audio is too large to share." });
       }
       if ((await activeCount(share.uid)) >= SHARE_LIMITS.activePerUser) return overLimit(res);
-      await shares.update(share.id, { ready: true, enabled: true });
+      await shares.update(share.id, { ready: true, enabled: true, peaks: body.peaks ?? null });
       log.info("share created", { uid: share.uid, id: share.id, bars: share.bars, bytes: size });
       res.json(ownerView({ ...share, ready: true, enabled: true }));
     }),
   );
 
-  // Turn off keeps the file; the page and its signed URLs stop working. Turn on counts toward the limit.
+  // Turn off keeps the file; the page stops at once and issued signed URLs within AUDIO_URL_TTL_MS.
+  // Turn on counts toward the limit.
   router.patch(
     "/:id",
     asyncHandler(async (req, res) => {
@@ -193,6 +231,17 @@ export function sharesRouter({ store, shares, blobs, log, now, publicUrl, limits
       }
       await shares.update(share.id, body);
       res.json(ownerView({ ...share, ...body }));
+    }),
+  );
+
+  // Delete removes the file and the record: for a cancelled recording, or a link the owner is done with.
+  router.delete(
+    "/:id",
+    asyncHandler(async (req, res) => {
+      const share = await mine(req, res);
+      if (!share) return;
+      await removeShare(shares, blobs, share);
+      res.status(204).end();
     }),
   );
 
@@ -209,7 +258,23 @@ async function publicShare(shares: ShareStore, id: string): Promise<ShareRecord 
 const off = (res: Response) =>
   res.status(404).set("Cache-Control", "no-store").json({ error: "off", message: "This link is turned off." });
 
-/** Anyone with the link: the share's metadata with a fresh signed URL, and a play counter. No sign-in. */
+/** Sends a redirect to a fresh signed URL of the share's audio; `?download` makes it an attachment. */
+const audioRedirect = (shares: ShareStore, blobs: SampleBlobs) =>
+  asyncHandler(async (req, res) => {
+    const share = await publicShare(shares, String(req.params.id));
+    if (!share) return res.status(404).set("Cache-Control", "no-store").type("text").send("This link is turned off.");
+    const download = req.query.download !== undefined;
+    const url = await blobs.readUrl(share.storagePath, {
+      ttlMs: AUDIO_URL_TTL_MS,
+      ...(download && { downloadName: downloadName(share.title) }),
+    });
+    res.set("Cache-Control", "no-store").redirect(302, url);
+  });
+
+/**
+ * Anyone with the link: the share's metadata, its audio (a redirect to a fresh signed URL, so the
+ * player streams it and a late Download still works) and a play counter. No sign-in.
+ */
 export function publicSharesRouter({ shares, blobs, limits, edgeSecret }: ShareDeps) {
   const router = Router();
   router.use(
@@ -227,10 +292,6 @@ export function publicSharesRouter({ shares, blobs, limits, edgeSecret }: ShareD
     asyncHandler(async (req, res) => {
       const share = await publicShare(shares, String(req.params.id));
       if (!share) return off(res);
-      const [audioUrl, downloadUrl] = await Promise.all([
-        blobs.readUrl(share.storagePath, { ttlMs: AUDIO_URL_TTL_MS }),
-        blobs.readUrl(share.storagePath, { ttlMs: AUDIO_URL_TTL_MS, downloadName: downloadName(share.title) }),
-      ]);
       const body: PublicShare = {
         id: share.id,
         title: share.title,
@@ -239,13 +300,14 @@ export function publicSharesRouter({ shares, blobs, limits, edgeSecret }: ShareD
         bars: share.bars,
         seconds: share.seconds,
         code: share.showCode ? share.code : null,
-        audioUrl,
-        downloadUrl,
+        peaks: share.peaks ?? null,
         createdAt: share.createdAt,
       };
       res.set("Cache-Control", "no-store").json(body);
     }),
   );
+
+  router.get("/:id/audio", audioRedirect(shares, blobs));
 
   router.post(
     "/:id/plays",
@@ -286,13 +348,14 @@ export function sharePageHtml(indexHtml: string, meta: PageMeta): string {
     ...(meta.audioUrl ? [tag("og:audio", meta.audioUrl), tag("og:audio:type", "audio/wav")] : []),
     `<meta name="twitter:card" content="summary_large_image" />`,
   ].join("\n    ");
+  // Function replacers: a string replacement would read `$&` or `$'` in a title as a pattern.
   return indexHtml
-    .replace(/<title>[\s\S]*?<\/title>/, `<title>${escapeHtml(meta.title)} - jam</title>`)
+    .replace(/<title>[\s\S]*?<\/title>/, () => `<title>${escapeHtml(meta.title)} - jam</title>`)
     .replace(
       /<meta\s+name="description"[\s\S]*?\/?>/,
-      `<meta name="description" content="${escapeHtml(meta.description)}" />`,
+      () => `<meta name="description" content="${escapeHtml(meta.description)}" />`,
     )
-    .replace("</head>", `    ${tags}\n  </head>`);
+    .replace("</head>", () => `    ${tags}\n  </head>`);
 }
 
 /** /s/:id (the listener page, with link preview tags) and /s/:id/audio.wav (a redirect to a fresh signed URL). */
@@ -315,20 +378,7 @@ export function sharePageRouter(deps: ShareDeps) {
     validate: false,
   }));
 
-  router.get(
-    "/s/:id/audio.wav",
-    limit,
-    asyncHandler(async (req, res) => {
-      const share = await publicShare(shares, String(req.params.id));
-      if (!share) return res.status(404).set("Cache-Control", "no-store").type("text").send("This link is turned off.");
-      const download = req.query.download !== undefined;
-      const url = await blobs.readUrl(share.storagePath, {
-        ttlMs: AUDIO_URL_TTL_MS,
-        ...(download && { downloadName: downloadName(share.title) }),
-      });
-      res.set("Cache-Control", "no-store").redirect(302, url);
-    }),
-  );
+  router.get("/s/:id/audio.wav", limit, audioRedirect(shares, blobs));
 
   router.get(
     "/s/:id",

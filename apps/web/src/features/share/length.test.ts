@@ -5,7 +5,7 @@ import {
   barsToSeconds,
   DEFAULT_BARS,
   guessPlay,
-  longestSequence,
+  sequenceCycles,
   maxBarsAt,
   sequenceLength,
 } from "./length";
@@ -50,12 +50,26 @@ describe("sequenceLength", () => {
   });
 });
 
-describe("longestSequence", () => {
-  it("finds the longest <...> in mini-notation strings only", () => {
-    expect(longestSequence('s("<bd sd>").mask("<1!20 0!4>")')).toBe(24);
-    expect(longestSequence("const x = a < b && c > d")).toBe(0);
-    expect(longestSequence('note("[<c e> g]")')).toBe(2);
-    expect(longestSequence("note(`<a b c>`)")).toBe(3);
+describe("sequenceCycles", () => {
+  it("finds the <...> in mini-notation strings only", () => {
+    expect(sequenceCycles('s("<bd sd>").mask("<1!20 0!4>")')).toBe(24);
+    expect(sequenceCycles("const x = a < b && c > d")).toBe(0);
+    expect(sequenceCycles('note("[<c e> g]")')).toBe(2);
+    expect(sequenceCycles("note(`<a b c>`)")).toBe(3);
+  });
+
+  it("applies /n and *n after a sequence, and .slow(n) and .fast(n) on the expression", () => {
+    expect(sequenceCycles('note("<c e g>/2")')).toBe(6);
+    expect(sequenceCycles('note("<c e g>").slow(2)')).toBe(6);
+    expect(sequenceCycles('note("<c e g b>").fast(2)')).toBe(2);
+    // 1.5 cycles a pass: 3 bars hold two whole passes.
+    expect(sequenceCycles('note("<c e g>*2")')).toBe(3);
+  });
+
+  it("multiplies a nested sequence, and lines up sequences with the least common multiple", () => {
+    expect(sequenceCycles('note("<a <b c>>")')).toBe(4);
+    expect(sequenceCycles('note("<a b c>").s("<x y>")')).toBe(6);
+    expect(sequenceCycles('note("<a b c> <x y>")')).toBe(6);
   });
 });
 
@@ -69,16 +83,20 @@ describe("arrangeCycles", () => {
 
 describe("guessPlay", () => {
   it("follows $: intro to its definition: <1!20 0!4> is 24 bars", () => {
-    expect(guessPlay(SCHRANZ)).toEqual({ label: "$: intro", bars: 24, source: "sequence" });
+    expect(guessPlay(SCHRANZ)).toEqual({ label: "$: intro", bars: 24, source: "sequence", capped: false });
   });
 
   it("sums an arrange that the played name points to", () => {
     const code = SCHRANZ.replace("\n$: intro", "\n// $: intro").replace("// $: song", "$: song");
-    expect(guessPlay(code)).toEqual({ label: "$: song", bars: 72, source: "arrange" });
+    expect(guessPlay(code)).toEqual({ label: "$: song", bars: 72, source: "arrange", capped: false });
   });
 
   it("ignores commented-out $: lines", () => {
     expect(activePlays(SCHRANZ)).toEqual(["intro"]);
+  });
+
+  it("lines up several $: patterns: 3 and 2 bars repeat after 6", () => {
+    expect(guessPlay('$: s("<bd sd hh>")\n$: note("<c e>")').bars).toBe(6);
   });
 
   it("takes the longest of several $: patterns", () => {
@@ -96,12 +114,13 @@ describe("guessPlay", () => {
       label: '$: s("bd*4, hh*8")',
       bars: DEFAULT_BARS,
       source: "default",
+      capped: false,
     });
     expect(guessPlay("").bars).toBe(DEFAULT_BARS);
   });
 
   it("clamps to 1..256", () => {
-    expect(guessPlay('$: s("<bd!300>")').bars).toBe(256);
+    expect(guessPlay('$: s("<bd!300>")')).toMatchObject({ bars: 256, capped: true });
   });
 });
 

@@ -33,12 +33,17 @@ const body = (ids: { sessionId: string; versionId: string }, extra: Record<strin
   ...extra,
 });
 
-/** The page's flow: start the share, PUT the file, finish it. */
+const PEAKS = Array.from({ length: SHARE_LIMITS.peaks }, (_, i) => (i % 10) / 10);
+
+/** The page's flow: start the share, PUT the file, finish it with the waveform. */
 async function share(ctx: Ctx, uid: string, extra: Record<string, unknown> = {}, bytes = 5000) {
   const ids = await sessionWithVersion(ctx, uid);
   const started = await request(ctx.app).post("/api/shares").set(ctx.asUser(uid)).send(body(ids, extra)).expect(201);
   ctx.blobs.put(sharePath(started.body.id), bytes);
-  const ready = await request(ctx.app).post(`/api/shares/${started.body.id}/ready`).set(ctx.asUser(uid));
+  const ready = await request(ctx.app)
+    .post(`/api/shares/${started.body.id}/ready`)
+    .set(ctx.asUser(uid))
+    .send({ peaks: PEAKS });
   return { ids, started, ready };
 }
 
@@ -78,6 +83,7 @@ describe("share links", () => {
     expect(ready.body).toMatchObject({ enabled: true, plays: 0, bars: 24, versionId: ids.versionId, showCode: false });
     expect(ready.body).not.toHaveProperty("uid");
     expect(ready.body).not.toHaveProperty("storagePath");
+    expect(ready.body).not.toHaveProperty("peaks");
 
     // Later edits do not change it: the stored code and version stay.
     await ctx.saveCode("alice", '$: s("hh*8")');
@@ -121,6 +127,65 @@ describe("share links", () => {
     expect(ctx.blobs.objects.has(sharePath(started.body.id))).toBe(false);
     // A share that never got ready is not listed.
     expect((await request(ctx.app).get("/api/shares").set(ctx.asUser("alice"))).body.shares).toEqual([]);
+  });
+
+  it("deletes a link with its file, for the owner only", async () => {
+    const ctx = setup();
+    const { started } = await share(ctx, "alice");
+    const id = started.body.id as string;
+    await request(ctx.app).delete(`/api/shares/${id}`).set(ctx.asUser("bob")).expect(404);
+    await request(ctx.app).delete(`/api/shares/${id}`).set(ctx.asUser("alice")).expect(204);
+    expect(ctx.blobs.objects.has(sharePath(id))).toBe(false);
+    expect(ctx.shares.shares.has(id)).toBe(false);
+    await request(ctx.app).get(`/api/public/shares/${id}`).expect(404);
+    // A cancelled recording deletes its unfinished share the same way.
+    const ids = await sessionWithVersion(ctx, "alice");
+    const pending = await request(ctx.app).post("/api/shares").set(ctx.asUser("alice")).send(body(ids)).expect(201);
+    await request(ctx.app).delete(`/api/shares/${pending.body.id}`).set(ctx.asUser("alice")).expect(204);
+    expect(ctx.shares.shares.size).toBe(0);
+  });
+
+  it("deleting a session deletes its links and their files, and keeps the links of other sessions", async () => {
+    const ctx = setup();
+    const kept = await share(ctx, "alice");
+    const keptId = kept.started.body.id as string;
+    const other = await request(ctx.app)
+      .post("/api/sessions")
+      .set(ctx.asUser("alice"))
+      .send({ name: "Second" })
+      .expect(201);
+    await request(ctx.app).post(`/api/sessions/${other.body.id}/open`).set(ctx.asUser("alice")).send({}).expect(200);
+    const gone = await share(ctx, "alice");
+    const goneId = gone.started.body.id as string;
+    expect(gone.ids.sessionId).toBe(other.body.id);
+
+    await request(ctx.app).delete(`/api/sessions/${other.body.id}`).set(ctx.asUser("alice")).expect(204);
+    expect(ctx.shares.shares.has(goneId)).toBe(false);
+    expect(ctx.blobs.objects.has(sharePath(goneId))).toBe(false);
+    await request(ctx.app).get(`/api/public/shares/${goneId}`).expect(404);
+    await request(ctx.app).get(`/s/${goneId}/audio.wav`).expect(404);
+    expect(ctx.shares.shares.has(keptId)).toBe(true);
+    await request(ctx.app).get(`/api/public/shares/${keptId}`).expect(200);
+    const list = await request(ctx.app).get("/api/shares").set(ctx.asUser("alice"));
+    expect(list.body.shares.map((s: { id: string }) => s.id)).toEqual([keptId]);
+  });
+
+  it("caps unfinished links and sweeps the ones older than an hour, with their files", async () => {
+    const ctx = setup();
+    const ids = await sessionWithVersion(ctx, "alice");
+    const start = () => request(ctx.app).post("/api/shares").set(ctx.asUser("alice")).send(body(ids));
+    const first = await start().expect(201);
+    ctx.blobs.put(sharePath(first.body.id), 100);
+    for (let i = 1; i < SHARE_LIMITS.pendingPerUser; i++) await start().expect(201);
+    const refused = await start();
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toBe("pending_limit");
+
+    ctx.clock.advance(SHARE_LIMITS.pendingTtlMs + 1000);
+    await start().expect(201);
+    expect(ctx.shares.shares.has(first.body.id)).toBe(false);
+    expect(ctx.blobs.objects.has(sharePath(first.body.id))).toBe(false);
+    expect([...ctx.shares.shares.values()].filter((s) => !s.ready)).toHaveLength(1);
   });
 
   it("validates bars and length", async () => {
@@ -171,15 +236,17 @@ describe("share links", () => {
 });
 
 describe("public share route", () => {
-  it("returns metadata and a signed URL with no uid, session or storage path", async () => {
+  const text = (value: unknown) => JSON.stringify(value);
+
+  it("returns metadata and the waveform with no uid, session, storage path or signed URL", async () => {
     const ctx = setup();
     const { started } = await share(ctx, "alice");
     const res = await request(ctx.app).get(`/api/public/shares/${started.body.id}`).expect(200);
     expect(res.body).toMatchObject({ title: "schranz v0", ownerName: "Tejas", bars: 24, seconds: 38.4, code: null });
-    expect(res.body.audioUrl).toContain("?get");
-    expect(res.body.downloadUrl).toContain("download=schranz-v0.wav");
-    const text = JSON.stringify(res.body);
-    expect(text).not.toContain("alice");
+    expect(res.body.peaks).toEqual(PEAKS);
+    // No signed URL in the JSON: the player and Download ask the audio route for a fresh one.
+    expect(text(res.body)).not.toContain("storage.test");
+    expect(text(res.body)).not.toContain("alice");
     for (const key of ["uid", "sessionId", "versionId", "storagePath", "plays", "enabled"]) {
       expect(res.body).not.toHaveProperty(key);
     }
@@ -229,6 +296,10 @@ describe("public share route", () => {
     expect(play.headers.location).toBe(`https://storage.test/shares/${started.body.id}.wav?get`);
     const save = await request(ctx.app).get(`/s/${started.body.id}/audio.wav?download`).expect(302);
     expect(save.headers.location).toContain("download=schranz-v0.wav");
+    // The same under /api, which the listener page uses (and the dev server proxies).
+    const api = await request(ctx.app).get(`/api/public/shares/${started.body.id}/audio?download`).expect(302);
+    expect(api.headers.location).toContain("download=schranz-v0.wav");
+    await request(ctx.app).get("/api/public/shares/AAAAAAAAAA/audio").expect(404);
   });
 
   it("rate limits the public routes per client", async () => {
@@ -271,6 +342,16 @@ describe("share page", () => {
     expect(res.text).toContain("This link is turned off");
     expect(res.text).not.toContain("og:audio");
     expect(res.text).toContain('<div id="root">');
+  });
+
+  it("keeps a $ in the title as text, not a replacement pattern", async () => {
+    const ctx = withIndex();
+    const { started } = await share(ctx, "alice", { title: "Cash $$ flow $' $&" });
+    const res = await request(ctx.app).get(`/s/${started.body.id}`).expect(200);
+    expect(res.text).toContain("<title>Cash $$ flow $&#39; $&#38; - jam</title>");
+    expect(res.text).toContain('<meta property="og:title" content="Cash $$ flow $&#39; $&#38;" />');
+    expect(res.text.match(/<\/head>/g)).toHaveLength(1);
+    expect(res.text.match(/<div id="root">/g)).toHaveLength(1);
   });
 
   it("builds tags without a built web app", () => {

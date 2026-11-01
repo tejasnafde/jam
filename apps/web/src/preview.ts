@@ -84,6 +84,10 @@ export function previewShares(): SharesHandle {
     setEnabled: async (id, enabled) => {
       handle.shares = handle.shares.map((x) => (x.id === id ? { ...x, enabled } : x));
     },
+    remove: async (id) => {
+      handle.shares = handle.shares.filter((x) => x.id !== id);
+    },
+    refresh: async () => {},
     added: () => {},
   };
   return handle;

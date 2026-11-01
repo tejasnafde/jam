@@ -8,6 +8,10 @@ export interface SharesHandle {
   /** Newest first. */
   shares: Share[];
   setEnabled(id: string, enabled: boolean): Promise<void>;
+  /** Deletes the link and its file. */
+  remove(id: string): Promise<void>;
+  /** Reads the list again, e.g. after a session (and its links) was deleted. */
+  refresh(): Promise<void>;
   /** Puts a share the dialog just made at the top of the list. */
   added(share: Share): void;
 }
@@ -31,13 +35,42 @@ export function useShares(api: Api | null): SharesHandle {
     };
   }, [client]);
 
+  const refresh = useCallback(async () => {
+    if (!client) return;
+    try {
+      const list = await client.list();
+      setState({ client, shares: list });
+    } catch (err) {
+      console.error(err);
+    }
+  }, [client]);
+
+  const remove = useCallback(
+    async (id: string) => {
+      if (!client) return;
+      try {
+        await client.remove(id);
+        setState((s) => s && { ...s, shares: s.shares.filter((x) => x.id !== id) });
+        toast("The link and its audio are deleted.");
+      } catch (err) {
+        console.error(err);
+        toast.error(err instanceof Error ? err.message : "Could not delete the link.");
+      }
+    },
+    [client],
+  );
+
   const setEnabled = useCallback(
     async (id: string, enabled: boolean) => {
       if (!client) return;
       try {
         const share = await client.update(id, { enabled });
         setState((s) => s && { ...s, shares: s.shares.map((x) => (x.id === id ? share : x)) });
-        toast(enabled ? "The link works again." : "The link is off. The page and its audio stop working.");
+        toast(
+          enabled
+            ? "The link works again."
+            : "The link is off. The page stops now, and audio already open stops within 15 minutes.",
+        );
       } catch (err) {
         console.error(err);
         toast.error(err instanceof Error ? err.message : "Could not change the link.");
@@ -57,5 +90,5 @@ export function useShares(api: Api | null): SharesHandle {
     [client],
   );
 
-  return { shares, setEnabled, added };
+  return { shares, setEnabled, remove, refresh, added };
 }

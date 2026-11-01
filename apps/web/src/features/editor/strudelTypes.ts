@@ -37,6 +37,7 @@ export interface StrudelMirror {
   repl?: {
     scheduler?: Scheduler;
     evaluate?: (code: string, autostart?: boolean) => Promise<unknown>;
+    state?: StrudelState;
   };
 }
 
