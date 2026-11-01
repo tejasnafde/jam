@@ -36,7 +36,8 @@ export interface RenderStats {
 export type RenderReply =
   | { type: "progress"; fraction: number }
   | { type: "done"; wav: ArrayBuffer; peaks: number[]; stats: RenderStats }
-  | { type: "error"; message: string };
+  /** `codeError`: the code itself does not run, so recording it in real time would not help. */
+  | { type: "error"; message: string; codeError?: boolean };
 
 export type RenderDone = Extract<RenderReply, { type: "done" }>;
 
@@ -66,12 +67,23 @@ export function isRenderReply(v: unknown): v is RenderReply {
   if (v.type !== "done") return false;
   const s = v.stats;
   return (
-    v.wav instanceof ArrayBuffer &&
+    // Not instanceof: a buffer from another realm (the frame) is not this realm's ArrayBuffer.
+    Object.prototype.toString.call(v.wav) === "[object ArrayBuffer]" &&
     Array.isArray(v.peaks) &&
     v.peaks.every(finite) &&
     isObject(s) &&
     [s.cps, s.seconds, s.sampleRate, s.peak, s.firstSoundSec, s.renderMs].every(finite)
   );
+}
+
+/** The frame could not render. `codeError` when the code itself does not run. */
+export class RenderFailed extends Error {
+  constructor(
+    message: string,
+    readonly codeError = false,
+  ) {
+    super(message);
+  }
 }
 
 /** The render took longer than its time limit. The fallback is offered for it. */
@@ -120,7 +132,7 @@ export function awaitReply(port: PortLike, { timeoutMs, onProgress, signal }: Ta
       const msg: unknown = e.data;
       if (!isRenderReply(msg)) return;
       if (msg.type === "progress") onProgress?.(Math.min(1, Math.max(0, msg.fraction)));
-      else if (msg.type === "error") finish(() => reject(new Error(msg.message)));
+      else if (msg.type === "error") finish(() => reject(new RenderFailed(msg.message, !!msg.codeError)));
       else finish(() => resolve(msg));
     };
   });
