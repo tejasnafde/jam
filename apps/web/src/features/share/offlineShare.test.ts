@@ -13,11 +13,11 @@ const DRAFT: ShareDraft = {
   showCode: false,
 };
 
-const done = (peak: number, cps = 0.625): RenderDone => ({
+const done = (peak: number, cps = 0.625, failed = 0, firstError = ""): RenderDone => ({
   type: "done",
   wav: new ArrayBuffer(48),
   peaks: [0.2, 1],
-  stats: { cps, seconds: 24 / cps + 2, sampleRate: 48_000, peak, firstSoundSec: 0, renderMs: 1200 },
+  stats: { cps, seconds: 24 / cps + 2, sampleRate: 48_000, peak, firstSoundSec: 0, renderMs: 1200, failed, firstError },
 });
 
 function deps(render: OfflineShareDeps["render"], audible = true) {
@@ -73,5 +73,14 @@ describe("runOfflineShare", () => {
     await expect(runOfflineShare(DRAFT, d, () => {}, new AbortController().signal)).rejects.toBeInstanceOf(
       ShareCancelled,
     );
+  });
+
+  it("does not upload a partly failed render with a layer missing, and offers real time", async () => {
+    const d = deps(async () => done(0.8, 0.625, 12, 'sound "kick" not found'));
+    const err = await runOfflineShare(DRAFT, d, () => {}, new AbortController().signal).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ShareProblem);
+    expect((err as ShareProblem).offerRealtime).toBe(true);
+    expect((err as ShareProblem).message).toBe('12 notes could not play in the render: sound "kick" not found');
+    expect(d.client.create).not.toHaveBeenCalled();
   });
 });

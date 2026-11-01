@@ -69,7 +69,10 @@ export async function runOfflineShare(
   } catch (err) {
     error = err;
   }
-  const decision = decideFallback(done ? { ok: true, peak: done.stats.peak } : { ok: false, error }, await audible);
+  const outcome = done
+    ? { ok: true as const, peak: done.stats.peak, failed: done.stats.failed, firstError: done.stats.firstError }
+    : { ok: false as const, error };
+  const decision = decideFallback(outcome, await audible);
   if (decision.kind === "cancelled") throw new ShareCancelled();
   if (decision.kind !== "upload" || !done) {
     if (error) console.error(error);

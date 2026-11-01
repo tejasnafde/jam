@@ -8,6 +8,9 @@ const src = (p: string) => fileURLToPath(new URL(p, import.meta.url));
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  // One id per build (or dev server), shared by the page and the render frame, so the page can
+  // refuse a stale cached render.html from an older deploy.
+  define: { __JAM_BUILD__: JSON.stringify(process.env.JAM_BUILD ?? new Date().toISOString()) },
   resolve: {
     alias: {
       "@": src("./src"),
