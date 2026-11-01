@@ -1,6 +1,7 @@
 import { PanelRight } from "lucide-react";
 import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { LevelMeter } from "./LevelMeter";
 import { LiveToggle } from "./LiveToggle";
@@ -20,6 +21,8 @@ interface Props {
   session?: ReactNode;
   tools?: ReactNode;
   account: ReactNode;
+  /** Hides the shortcut hint, so a status chip in the tools has room. */
+  hideShortcuts?: boolean;
 }
 
 export function TopBar({
@@ -33,6 +36,7 @@ export function TopBar({
   session,
   tools,
   account,
+  hideShortcuts = false,
 }: Props) {
   return (
     <header className="sticky top-0 z-10 flex h-14 flex-none items-center gap-3 border-b border-hairline bg-background px-3 md:gap-4 md:px-4">
@@ -53,7 +57,13 @@ export function TopBar({
       </div>
       {/* A phone has no room here; the page shows the name in a strip below instead. */}
       {session && <div className="flex min-w-0 items-center max-md:hidden">{session}</div>}
-      <p className="flex items-center gap-1.5 text-xs text-muted-foreground max-xl:hidden" aria-label="Shortcuts">
+      <p
+        className={cn(
+          "flex items-center gap-1.5 text-xs text-muted-foreground max-xl:hidden",
+          hideShortcuts && "hidden",
+        )}
+        aria-label="Shortcuts"
+      >
         <kbd className="jam-kbd">{PLAY_KEY}</kbd>
         <kbd className="jam-kbd">Enter</kbd>
         <span>plays</span>
