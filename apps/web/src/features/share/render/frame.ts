@@ -44,6 +44,9 @@ type Mirror = StrudelMirror & {
   repl?: NonNullable<StrudelMirror["repl"]> & { setCps?: (cps: number) => void; state?: StrudelState };
 };
 
+/** The code itself fails. */
+class CodeError extends Error {}
+
 const engine = () => globalThis as unknown as Engine;
 
 let mirror: Promise<Mirror> | null = null;
@@ -84,7 +87,7 @@ export async function render(req: RenderRequest, post: (r: RenderReply, transfer
   repl.setCps?.(req.cps);
   await repl.evaluate(req.code, false);
   const evalError = repl.state?.evalError;
-  if (evalError) throw new Error(`The code does not run: ${evalError.message}`);
+  if (evalError) throw new CodeError(`The code does not run: ${evalError.message}`);
   const cps = repl.scheduler.cps ?? req.cps;
   const pattern = untilCycle(repl.scheduler.pattern, req.cycles) as Pattern;
 
@@ -182,7 +185,8 @@ export function listen() {
     const post = (r: RenderReply, transfer: Transferable[] = []) => port.postMessage(r, transfer);
     render(e.data, post).catch((err: unknown) => {
       console.error(err);
-      post({ type: "error", message: err instanceof Error ? err.message : String(err) });
+      const message = err instanceof Error ? err.message : String(err);
+      post({ type: "error", message, codeError: err instanceof CodeError });
     });
   });
   window.parent.postMessage(FRAME_READY, location.origin);
