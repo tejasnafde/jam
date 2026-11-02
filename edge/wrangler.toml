@@ -1,7 +1,7 @@
 name = "jam-proxy"
 main = "src/index.js"
 compatibility_date = "2026-10-01"
-workers_dev = false
+workers_dev = true  # also serve on *.workers.dev: outside the tn07.dev zone, so its Browser Integrity Check does not block MCP clients (2026-11-02)
 
 # custom_domain = true makes Cloudflare create and own the DNS record and the
 # certificate for this hostname. Do NOT also add a record for `jam` with dns.sh.
